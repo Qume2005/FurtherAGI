@@ -1,0 +1,45 @@
+[package]
+name = "examples"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "workflow_basic"
+path = "src/bin/workflow/basic.rs"
+
+[[bin]]
+name = "workflow_composite"
+path = "src/bin/workflow/composite.rs"
+
+[[bin]]
+name = "workflow_broadcast"
+path = "src/bin/workflow/broadcast.rs"
+
+[[bin]]
+name = "workflow_conditional"
+path = "src/bin/workflow/conditional.rs"
+
+[[bin]]
+name = "workflow_loop"
+path = "src/bin/workflow/loop.rs"
+
+[[bin]]
+name = "workflow_error_handler"
+path = "src/bin/workflow/error_handler.rs"
+
+[[bin]]
+name = "workflow_stateful"
+path = "src/bin/workflow/stateful.rs"
+
+[[bin]]
+name = "workflow_config_driven"
+path = "src/bin/workflow/config_driven.rs"
+
+[[bin]]
+name = "workflow_docker_python"
+path = "src/bin/workflow/docker_python.rs"
+
+[dependencies]
+autonomous = { path = "../autonomous" }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
