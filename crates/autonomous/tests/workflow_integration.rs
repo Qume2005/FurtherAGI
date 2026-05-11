@@ -2,9 +2,10 @@ use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
 use autonomous::workflow::definition::from_fn;
-use autonomous::workflow::model::ExecutionContext;
+use autonomous::workflow::model::{ExecutionContext, StateStore};
 use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
+use autonomous::workflow::builtin_workflows::state_node;
 use std::sync::Arc;
 
 fn make_ctx() -> ExecutionContext {
@@ -164,4 +165,40 @@ async fn e2e_loop_in_manager() {
     let ctx = make_ctx();
     let result: i32 = mgr.execute_typed("triple_add", 0, &ctx).await.unwrap();
     assert_eq!(result, 3);
+}
+
+/// State node: share StateStore across closures via Arc capture.
+#[tokio::test]
+async fn e2e_state_node_shared_store() {
+    let store = Arc::new(StateStore::new());
+    let store_clone = store.clone();
+
+    let mut builder = DagBuilder::new();
+    let s = builder.add_workflow("state", state_node::<i32>(store.clone()));
+    let step = builder.add("accumulate", move |input: i32| {
+        let s = store_clone.clone();
+        async move {
+            let prev = s.get::<i32>("sum").unwrap_or(0);
+            let new_val = prev + input;
+            s.set("sum", new_val, None);
+            Ok::<i32, WorkflowError>(new_val)
+        }
+    });
+
+    builder.connect(s, step).unwrap();
+    builder.set_entry(s).unwrap();
+    builder.set_exit(step).unwrap();
+    let dag = builder.build().unwrap();
+
+    let ctx = make_ctx();
+
+    // First run: 0 + 10 = 10
+    let r1 = Executor::execute(&dag, Box::new(10i32), &ctx).await.unwrap();
+    assert_eq!(*r1.output.downcast_ref::<i32>().unwrap(), 10);
+    assert_eq!(store.get::<i32>("sum"), Some(10));
+
+    // Second run: 10 + 20 = 30
+    let r2 = Executor::execute(&dag, Box::new(20i32), &ctx).await.unwrap();
+    assert_eq!(*r2.output.downcast_ref::<i32>().unwrap(), 30);
+    assert_eq!(store.get::<i32>("sum"), Some(30));
 }

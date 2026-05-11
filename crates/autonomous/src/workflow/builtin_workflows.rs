@@ -34,6 +34,7 @@
 //! ```
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -41,7 +42,7 @@ use tracing;
 
 use crate::workflow::error::WorkflowError;
 use crate::workflow::definition::Workflow;
-use crate::workflow::model::ExecutionContext;
+use crate::workflow::model::{ExecutionContext, StateStore};
 
 /// Identity workflow: passes input through unchanged.
 pub struct Identity<T>(PhantomData<T>);
@@ -209,6 +210,51 @@ impl<T: Send + Sync + 'static> Workflow<T, T> for Delay<T> {
     }
 }
 
+/// State workflow: passthrough node that carries a shared [`StateStore`].
+///
+/// The node itself does nothing at execution time — input passes through unchanged.
+/// Users capture `Arc<StateStore>` in other closures to read/write shared state.
+///
+/// # 示例
+///
+/// ```rust
+/// use autonomous::workflow::builtin_workflows::{state_node, Map};
+/// use autonomous::workflow::dag::DagBuilder;
+/// use autonomous::workflow::model::StateStore;
+/// use std::sync::Arc;
+///
+/// let store = Arc::new(StateStore::new());
+/// let mut builder = DagBuilder::new();
+/// let s = builder.add_workflow("state", state_node::<i32>(store.clone()));
+/// ```
+#[allow(dead_code)] // store kept alive to share state across closures
+pub struct StateNode<T> {
+    store: Arc<StateStore>,
+    _marker: PhantomData<fn() -> T>,
+}
+
+#[async_trait]
+impl<T: Send + Sync + 'static> Workflow<T, T> for StateNode<T> {
+    fn name(&self) -> &str {
+        "state"
+    }
+
+    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
+        Ok(input)
+    }
+}
+
+/// Create a state node that passes input through unchanged.
+///
+/// The returned workflow holds a reference to the given [`StateStore`].
+/// Capture `Arc<StateStore>` in other closures to share state across workflows.
+pub fn state_node<T: Send + Sync + 'static>(store: Arc<StateStore>) -> Box<dyn super::definition::ErasedWorkflow> {
+    super::definition::into_erased(StateNode::<T> {
+        store,
+        _marker: PhantomData,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +313,20 @@ mod tests {
         let ctx = make_ctx();
         let result = wf.execute("test", &ctx).await.unwrap();
         assert_eq!(result, "test");
+    }
+
+    #[tokio::test]
+    async fn state_node_passthrough() {
+        let store = Arc::new(StateStore::new());
+        store.set("key", 42i32, None);
+        let wf = StateNode::<i32> {
+            store: store.clone(),
+            _marker: PhantomData,
+        };
+        let ctx = make_ctx();
+        let result = wf.execute(99, &ctx).await.unwrap();
+        assert_eq!(result, 99);
+        // Store is still accessible.
+        assert_eq!(store.get::<i32>("key"), Some(42));
     }
 }
