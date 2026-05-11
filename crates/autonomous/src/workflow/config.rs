@@ -46,8 +46,8 @@
 //!
 //! ```rust
 //! use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
-//! use autonomous::workflow::traits::{Workflow, into_erased};
-//! use autonomous::workflow::types::ExecutionContext;
+//! use autonomous::workflow::definition::{Workflow, into_erased};
+//! use autonomous::workflow::model::ExecutionContext;
 //! use autonomous::workflow::error::WorkflowError;
 //! use async_trait::async_trait;
 //!
@@ -91,12 +91,12 @@
 
 mod builder;
 mod error;
-mod type_registry;
-mod types;
+mod registry;
+mod schema;
 mod workflow_registry;
 
 pub use builder::ConfigBuilder;
 pub use error::ConfigBuildError;
-pub use type_registry::TypeRegistry;
-pub use types::{EdgeConfig, NodeConfig, WorkflowConfig, WorkflowMeta};
+pub use registry::TypeRegistry;
+pub use schema::{EdgeConfig, NodeConfig, WorkflowConfig, WorkflowMeta};
 pub use workflow_registry::WorkflowFactoryRegistry;

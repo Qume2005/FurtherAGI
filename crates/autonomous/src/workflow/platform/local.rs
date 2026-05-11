@@ -8,7 +8,7 @@ use std::process::Stdio;
 use async_trait::async_trait;
 use tokio::process::Command;
 
-use super::r#trait::{CommandOutput, PlatformError, WorkPlatform};
+use super::api::{CommandOutput, PlatformError, WorkPlatform};
 
 /// A local work platform that executes commands on the host machine.
 ///

@@ -13,7 +13,7 @@ use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::Docker;
 use tempfile::TempDir;
 
-use super::r#trait::{CommandOutput, PlatformError, WorkPlatform};
+use super::api::{CommandOutput, PlatformError, WorkPlatform};
 
 /// A work platform backed by a Docker container.
 ///

@@ -7,11 +7,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::workflow::dag::{DagBuilder, WorkflowDag};
-use crate::workflow::types::{NodeId, WorkflowId};
+use crate::workflow::model::{NodeId, WorkflowId};
 
 use super::error::ConfigBuildError;
-use super::type_registry::TypeRegistry;
-use super::types::{EdgeConfig, NodeConfig, WorkflowConfig};
+use super::registry::TypeRegistry;
+use super::schema::{EdgeConfig, NodeConfig, WorkflowConfig};
 use super::workflow_registry::WorkflowFactoryRegistry;
 
 /// Builds a `WorkflowDag` from TOML configuration using registered types and workflows.
@@ -20,8 +20,8 @@ use super::workflow_registry::WorkflowFactoryRegistry;
 ///
 /// ```rust
 /// use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
-/// use autonomous::workflow::traits::{Workflow, into_erased};
-/// use autonomous::workflow::types::ExecutionContext;
+/// use autonomous::workflow::definition::{Workflow, into_erased};
+/// use autonomous::workflow::model::ExecutionContext;
 /// use autonomous::workflow::error::WorkflowError;
 /// use async_trait::async_trait;
 ///

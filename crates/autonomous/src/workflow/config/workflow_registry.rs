@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use crate::workflow::traits::ErasedWorkflow;
+use crate::workflow::definition::ErasedWorkflow;
 
 /// Registry mapping string names to workflow factory closures.
 ///
@@ -18,8 +18,8 @@ use crate::workflow::traits::ErasedWorkflow;
 ///
 /// ```rust
 /// use autonomous::workflow::config::WorkflowFactoryRegistry;
-/// use autonomous::workflow::traits::{Workflow, into_erased};
-/// use autonomous::workflow::types::ExecutionContext;
+/// use autonomous::workflow::definition::{Workflow, into_erased};
+/// use autonomous::workflow::model::ExecutionContext;
 /// use autonomous::workflow::error::WorkflowError;
 /// use async_trait::async_trait;
 ///

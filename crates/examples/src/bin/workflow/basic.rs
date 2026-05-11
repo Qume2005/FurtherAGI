@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::types::{ExecutionContext, State};
+use autonomous::workflow::model::{ExecutionContext, State};
 use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
 

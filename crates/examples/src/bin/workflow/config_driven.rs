@@ -7,8 +7,8 @@ use std::sync::Arc;
 use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
-use autonomous::workflow::traits::from_fn;
-use autonomous::workflow::types::{ExecutionContext, State};
+use autonomous::workflow::definition::from_fn;
+use autonomous::workflow::model::{ExecutionContext, State};
 use autonomous::workflow::platform::NullPlatform;
 
 const PIPELINE_TOML: &str = r#"

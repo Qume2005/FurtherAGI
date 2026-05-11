@@ -9,7 +9,7 @@
 //!
 //! ```rust
 //! use autonomous::workflow::dag::DagBuilder;
-//! use autonomous::workflow::types::ExecutionContext;
+//! use autonomous::workflow::model::ExecutionContext;
 //! use autonomous::workflow::error::WorkflowError;
 //!
 //! let mut builder = DagBuilder::new();
@@ -42,7 +42,7 @@ use std::marker::PhantomData;
 use async_trait::async_trait;
 
 use super::error::WorkflowError;
-use super::types::ExecutionContext;
+use super::model::ExecutionContext;
 
 /// 强类型异步工作流。
 ///
@@ -52,9 +52,9 @@ use super::types::ExecutionContext;
 /// # 示例
 ///
 /// ```rust
-/// use autonomous::workflow::traits::Workflow;
+/// use autonomous::workflow::definition::Workflow;
 /// use autonomous::workflow::error::WorkflowError;
-/// use autonomous::workflow::types::ExecutionContext;
+/// use autonomous::workflow::model::ExecutionContext;
 /// use async_trait::async_trait;
 ///
 /// struct Double;
@@ -123,9 +123,9 @@ struct WorkflowWrapper<W, I, O> {
 /// # 示例
 ///
 /// ```rust
-/// use autonomous::workflow::traits::{Workflow, into_erased, ErasedWorkflow};
+/// use autonomous::workflow::definition::{Workflow, into_erased, ErasedWorkflow};
 /// use autonomous::workflow::error::WorkflowError;
-/// use autonomous::workflow::types::ExecutionContext;
+/// use autonomous::workflow::model::ExecutionContext;
 /// use async_trait::async_trait;
 ///
 /// struct Double;
@@ -185,8 +185,8 @@ where
 /// # 示例
 ///
 /// ```rust
-/// use autonomous::workflow::traits::from_fn;
-/// use autonomous::workflow::types::ExecutionContext;
+/// use autonomous::workflow::definition::from_fn;
+/// use autonomous::workflow::model::ExecutionContext;
 /// use autonomous::workflow::error::WorkflowError;
 ///
 /// let wf = from_fn("add_one", |input: i32, _ctx: &ExecutionContext| async move {
@@ -238,7 +238,7 @@ impl<I: Send + Sync + 'static, O: Send + Sync + 'static, W: Workflow<I, O>> Eras
         ctx: &ExecutionContext,
     ) -> Result<Box<dyn Any + Send + Sync>, WorkflowError> {
         let typed_input = input.downcast::<I>().map_err(|_| WorkflowError::DowncastError {
-            node: super::types::NodeId(0),
+            node: super::model::NodeId(0),
             expected: std::any::type_name::<I>().to_string(),
         })?;
         let result = self.workflow.execute(*typed_input, ctx).await?;
@@ -250,7 +250,7 @@ impl<I: Send + Sync + 'static, O: Send + Sync + 'static, W: Workflow<I, O>> Eras
 mod tests {
     use super::*;
     use crate::workflow::platform::NullPlatform;
-    use crate::workflow::types::State;
+    use crate::workflow::model::State;
     use std::sync::Arc;
 
     struct AddOne;

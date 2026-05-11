@@ -32,7 +32,7 @@ pub struct NodeId(pub u64);
 /// # 示例
 ///
 /// ```
-/// use autonomous::workflow::types::WorkflowId;
+/// use autonomous::workflow::model::WorkflowId;
 ///
 /// let id = WorkflowId::from("builtin@AddOne");
 /// assert_eq!(id.namespace(), "builtin");
@@ -114,7 +114,7 @@ impl std::fmt::Display for WorkflowId {
 /// # 示例
 ///
 /// ```
-/// use autonomous::workflow::types::State;
+/// use autonomous::workflow::model::State;
 ///
 /// let state = State::new();
 /// state.set("counter", 42i32);

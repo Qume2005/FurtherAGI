@@ -18,8 +18,8 @@
 //!
 //! ```rust
 //! use autonomous::workflow::builtin_workflows::{Identity, Map, Predicate};
-//! use autonomous::workflow::traits::Workflow;
-//! use autonomous::workflow::types::ExecutionContext;
+//! use autonomous::workflow::definition::Workflow;
+//! use autonomous::workflow::model::ExecutionContext;
 //! use autonomous::workflow::error::WorkflowError;
 //! use async_trait::async_trait;
 //!
@@ -40,8 +40,8 @@ use async_trait::async_trait;
 use tracing;
 
 use crate::workflow::error::WorkflowError;
-use crate::workflow::traits::Workflow;
-use crate::workflow::types::ExecutionContext;
+use crate::workflow::definition::Workflow;
+use crate::workflow::model::ExecutionContext;
 
 /// Identity workflow: passes input through unchanged.
 pub struct Identity<T>(PhantomData<T>);
@@ -212,7 +212,7 @@ impl<T: Send + Sync + 'static> Workflow<T, T> for Delay<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflow::types::State;
+    use crate::workflow::model::State;
     use crate::workflow::platform::NullPlatform;
     use std::sync::Arc;
 

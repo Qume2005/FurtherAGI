@@ -1,13 +1,13 @@
 use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
-use autonomous::workflow::traits::from_fn;
-use autonomous::workflow::types::ExecutionContext;
+use autonomous::workflow::definition::from_fn;
+use autonomous::workflow::model::ExecutionContext;
 use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
 use std::sync::Arc;
 
-use autonomous::workflow::types::State;
+use autonomous::workflow::model::State;
 
 fn make_ctx() -> ExecutionContext {
     ExecutionContext {

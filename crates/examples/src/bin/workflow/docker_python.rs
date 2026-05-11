@@ -16,7 +16,7 @@ use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
 use autonomous::workflow::platform::{DockerPlatform, WorkPlatform};
-use autonomous::workflow::types::{ExecutionContext, State};
+use autonomous::workflow::model::{ExecutionContext, State};
 use std::path::Path;
 use std::sync::Arc;
 

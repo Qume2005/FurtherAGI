@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
-use autonomous::workflow::traits::{into_erased, Workflow};
-use autonomous::workflow::types::{
+use autonomous::workflow::definition::{into_erased, Workflow};
+use autonomous::workflow::model::{
     ExecutionContext, State,
 };
 use autonomous::workflow::workflow_manager::WorkflowManager;

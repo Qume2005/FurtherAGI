@@ -8,7 +8,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use tempfile::TempDir;
 
-use super::r#trait::{CommandOutput, PlatformError, WorkPlatform};
+use super::api::{CommandOutput, PlatformError, WorkPlatform};
 
 /// A no-op work platform for workflows that don't need external execution.
 ///

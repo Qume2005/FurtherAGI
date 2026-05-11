@@ -13,7 +13,7 @@ use anyhow::Error as AnyhowError;
 use thiserror::Error;
 
 use super::platform::PlatformError;
-use super::types::{NodeId, WorkflowId};
+use super::model::{NodeId, WorkflowId};
 
 /// 工作流系统中所有错误的统一枚举。
 ///

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
-use autonomous::workflow::types::{ExecutionContext, State};
+use autonomous::workflow::model::{ExecutionContext, State};
 use autonomous::workflow::platform::NullPlatform;
 
 #[tokio::main]

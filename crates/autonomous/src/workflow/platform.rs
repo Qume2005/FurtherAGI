@@ -19,7 +19,7 @@
 //!
 //! ```rust
 //! use autonomous::workflow::platform::{NullPlatform, WorkPlatform};
-//! use autonomous::workflow::types::{State, ExecutionContext};
+//! use autonomous::workflow::model::{State, ExecutionContext};
 //! use std::path::Path;
 //! use std::sync::Arc;
 //!
@@ -28,7 +28,7 @@
 //! // platform.run_command() → 空操作
 //! ```
 
-mod r#trait;
+mod api;
 mod null;
 mod local;
 mod docker;
@@ -36,4 +36,4 @@ mod docker;
 pub use docker::DockerPlatform;
 pub use local::LocalPlatform;
 pub use null::NullPlatform;
-pub use r#trait::{CommandOutput, PlatformError, WorkPlatform};
+pub use api::{CommandOutput, PlatformError, WorkPlatform};
