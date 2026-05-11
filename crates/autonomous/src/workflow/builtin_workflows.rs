@@ -13,6 +13,7 @@
 //! | [`Constant`] | `I → O` | 忽略输入，总是返回固定值 |
 //! | [`Log`] | `T → T` | 用 `tracing::info!` 记录值并透传 |
 //! | [`Delay`] | `T → T` | 等待指定时长后透传 |
+//! | [`StateNode`] / [`state_node`] | `T → T` | 透传，携带共享 [`StateStore`](crate::workflow::model::StateStore) |
 //!
 //! ## 示例
 //!

@@ -35,7 +35,7 @@
 //! | [`definition`] | 核心 trait：`Workflow<I, O>`（用户实现）和 `ErasedWorkflow`（内部类型擦除） |
 //! | [`dag`] | DAG 数据结构和构建器：`WorkflowDag`、`DagBuilder`、`NodeKind` |
 //! | [`executor`] | Async 执行引擎：拓扑层级并行执行、条件路由、循环、错误恢复 |
-//! | [`builtin_workflows`] | 内建工作流标准库：`Identity`、`Map`、`Predicate`、`Constant`、`Log`、`Delay` |
+//! | [`builtin_workflows`] | 内建工作流标准库：`Identity`、`Map`、`Predicate`、`Constant`、`Log`、`Delay`、`StateNode`、`state_node` |
 //! | [`workflow_manager`] | 中央注册器：`WorkflowManager`，支持注册、校验、类型擦除/强类型执行 |
 //! | [`config`] | 配置驱动构建：从 TOML 文件声明式构建 DAG |
 

@@ -1,3 +1,5 @@
+//! DAG connection methods and build logic (edge creation, cycle detection, finalization).
+
 use std::collections::{HashMap, HashSet};
 
 use super::super::error::WorkflowError;

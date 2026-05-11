@@ -1,3 +1,5 @@
+//! Immutable workflow DAG and accessor methods.
+
 use std::any::Any;
 use std::collections::HashMap;
 
@@ -58,22 +60,27 @@ impl WorkflowDag {
         }
     }
 
+    /// Return a reference to the node map.
     pub fn nodes(&self) -> &HashMap<NodeId, Node> {
         &self.nodes
     }
 
+    /// Return a slice of all edges in the DAG.
     pub fn edges(&self) -> &[Edge] {
         &self.edges
     }
 
+    /// Return the entry node ID, if set.
     pub fn entry_node(&self) -> Option<NodeId> {
         self.entry_node
     }
 
+    /// Return the exit node ID, if set.
     pub fn exit_node(&self) -> Option<NodeId> {
         self.exit_node
     }
 
+    /// Return the cached topological order of nodes.
     pub fn topo_order(&self) -> &[NodeId] {
         &self.topo_order
     }

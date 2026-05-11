@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     builder.connect(bc, left)?;
     builder.connect(bc, right)?;
     builder.set_entry(src)?;
+    // 只有 left 分支的输出作为 DAG 结果；right 分支同样会执行，但其输出被丢弃
     builder.set_exit(left)?;
 
     let dag = builder.build()?;

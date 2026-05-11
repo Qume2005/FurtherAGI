@@ -26,6 +26,7 @@ async fn main() -> anyhow::Result<()> {
         println!("  FailIfNegative({input}): OK");
         Ok::<i32, WorkflowError>(input)
     });
+    // error_handler 接收失败节点的错误消息（String），其返回值将替代失败节点的输出
     let _handler = builder.add_error_handler(
         fail,
         from_fn("error_handler", |error_msg: String, _ctx: &ExecutionContext| async move {

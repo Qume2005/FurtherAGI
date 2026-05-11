@@ -4,7 +4,7 @@
 //!
 //! ## Core types
 //!
-//! - [`NodeKind`] -- node type enum (Workflow, Broadcast, Error, Loop, Conditional, SubWorkflow)
+//! - [`NodeKind`] -- node type enum (Workflow, Broadcast, Error, Loop, Conditional, SubWorkflow, Connection)
 //! - [`Node`] -- a node in the DAG, containing a type-erased workflow and input/output types
 //! - [`Edge`] -- directed edge, optional label (for conditional branching "true" / "false")
 //! - [`WorkflowDag`] -- immutable, built DAG

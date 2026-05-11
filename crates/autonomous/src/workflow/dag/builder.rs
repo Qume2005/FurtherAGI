@@ -1,3 +1,5 @@
+//! DAG builder: fluent API for constructing workflow DAGs with validation.
+
 use std::any::TypeId;
 use std::future::Future;
 
@@ -9,6 +11,7 @@ use super::{
 };
 
 impl DagBuilder {
+    /// Create a new, empty `DagBuilder`.
     pub fn new() -> Self {
         Self {
             nodes: std::collections::HashMap::new(),

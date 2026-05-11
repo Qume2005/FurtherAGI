@@ -18,6 +18,7 @@ async fn main() -> Result<(), WorkflowError> {
     };
 
     let mut builder = DagBuilder::new();
+    // 构建管道: AddOne(3) → MulTwo(4) → AddOne(9)
     let a = builder.add("builtin@AddOne", |input: i32| async move {
         Ok::<i32, WorkflowError>(input + 1)
     });

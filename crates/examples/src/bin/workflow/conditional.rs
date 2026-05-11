@@ -40,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
     builder.connect_labeled(cond, t, "true")?;
     builder.connect_labeled(cond, f, "false")?;
     builder.set_entry(cond)?;
+    // DAG 只有一个出口；要测试另一分支，需要构建不同的 DAG（exit 指向 f）
     builder.set_exit(t)?;
 
     let dag = builder.build()?;
@@ -48,7 +49,9 @@ async fn main() -> anyhow::Result<()> {
     let result = Executor::execute(&dag, Box::new(42i32), &ctx).await?;
     assert_eq!(*result.output.downcast_ref::<i32>().unwrap(), 100);
 
-    // 负数分支
+    // 负数分支：需要将 exit 切换到 false 分支，因此重新构建整个 DAG
+    // 使用 from_fn 是因为 add_conditional 的第二个参数需要 Workflow trait 实现，
+    // 而普通闭包无法直接满足；from_fn 将闭包包装为符合 trait 的类型
     println!("\nInput: -7");
     let mut b2 = DagBuilder::new();
     let c2 = b2.add_conditional(

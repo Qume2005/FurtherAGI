@@ -21,6 +21,7 @@ async fn main() -> anyhow::Result<()> {
         println!("  iteration: {input} → {}", input + 1);
         Ok::<i32, WorkflowError>(input + 1)
     });
+    // body 同时作为循环体子图的入口和出口，每次迭代将输出传回自身
     let loop_node = builder.add_loop(5, body, body)?;
     builder.set_entry(loop_node)?;
     builder.set_exit(loop_node)?;

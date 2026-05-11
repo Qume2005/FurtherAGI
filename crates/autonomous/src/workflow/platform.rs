@@ -1,6 +1,6 @@
 //! # 工作平台（WorkPlatform）
 //!
-//! 统一的执行环境抽象，合并了之前的 `ComputePlatform` 和 `Workspace`。
+//! 统一的执行环境抽象。
 //!
 //! ## 核心概念
 //!

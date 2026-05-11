@@ -48,24 +48,36 @@ print(f"Sum of 1..100 = {x})
     };
     println!("    输出:\n{}\n", result);
 
-    // ── 示例 B: DAG 管道 — Factorial → ReverseUpper ─────────
+    // ── 示例 B: DAG 管道 — Factorial(5) → ReverseUpper ─────────
     println!("[3] DAG 管道: Factorial(5) → ReverseUpper...");
     let mut builder = DagBuilder::new();
 
-    let factorial = builder.add_with_ctx("factorial", |code: String, ctx: &ExecutionContext| {
+    // 第一个节点：接收 i32，生成计算阶乘的 Python 脚本，返回结果字符串
+    let factorial = builder.add_with_ctx("factorial", |input: i32, ctx: &ExecutionContext| {
         let plat = ctx.platform.clone();
         async move {
-            plat.write_file(Path::new("eval_script.py"), code.as_bytes()).await?;
-            let output = plat.run_command("python", &["/workspace/eval_script.py"], &[]).await?;
-            Ok::<String, WorkflowError>(output.stdout_string().unwrap_or_default().trim_end().to_string())
+            let code = format!(
+                "import math\nprint(math.factorial({input}))\n"
+            );
+            plat.write_file(Path::new("factorial.py"), code.as_bytes()).await?;
+            let output = plat.run_command("python", &["/workspace/factorial.py"], &[]).await?;
+            let result = output.stdout_string().unwrap_or_default().trim_end().to_string();
+            println!("    factorial({input}) = {result}");
+            Ok::<String, WorkflowError>(result)
         }
     });
-    let reverse = builder.add_with_ctx("reverse_upper", |code: String, ctx: &ExecutionContext| {
+    // 第二个节点：接收上一个节点的字符串输出，将其反转并大写
+    let reverse = builder.add_with_ctx("reverse_upper", |input: String, ctx: &ExecutionContext| {
         let plat = ctx.platform.clone();
         async move {
-            plat.write_file(Path::new("eval_script.py"), code.as_bytes()).await?;
-            let output = plat.run_command("python", &["/workspace/eval_script.py"], &[]).await?;
-            Ok::<String, WorkflowError>(output.stdout_string().unwrap_or_default().trim_end().to_string())
+            let code = format!(
+                "s = {input:?}\nprint(s[::-1].upper())\n"
+            );
+            plat.write_file(Path::new("reverse.py"), code.as_bytes()).await?;
+            let output = plat.run_command("python", &["/workspace/reverse.py"], &[]).await?;
+            let result = output.stdout_string().unwrap_or_default().trim_end().to_string();
+            println!("    reverse_upper(\"{input}\") = \"{result}\"");
+            Ok::<String, WorkflowError>(result)
         }
     });
 
@@ -74,9 +86,11 @@ print(f"Sum of 1..100 = {x})
     builder.set_exit(reverse)?;
     let dag = builder.build()?;
 
+    // 输入 5: factorial(5)=120 → reverse_upper("120")="021"
     let result = Executor::execute(&dag, Box::new(5i32), &ctx).await?;
-    println!("    Done");
-    assert!(result.output.downcast_ref::<String>().is_some());
+    let output = result.output.downcast_ref::<String>().unwrap();
+    println!("    最终结果: \"{output}\"");
+    assert_eq!(output, "021");
 
     // ── 清理 ────────────────────────────────────────────────
     println!("\n[4] 清理 Docker 容器...");

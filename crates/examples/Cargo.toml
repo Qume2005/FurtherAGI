@@ -35,6 +35,10 @@ path = "src/bin/workflow/config_driven.rs"
 name = "workflow_docker_python"
 path = "src/bin/workflow/docker_python.rs"
 
+[[bin]]
+name = "workflow_state_node"
+path = "src/bin/workflow/state_node.rs"
+
 [dependencies]
 anyhow = "1"
 autonomous = { path = "../autonomous" }
