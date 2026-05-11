@@ -147,7 +147,7 @@ fn labeled_edge() {
 fn connection_node() {
     let mut builder = DagBuilder::new();
     let a = builder.add_workflow("add_one", into_erased(AddOne));
-    let conn = builder.add_connection("after_add", std::any::TypeId::of::<i32>());
+    let conn = builder.add_connection("after_add", TypeId::of::<i32>());
     let b = builder.add_workflow("mul_two", into_erased(MulTwo));
 
     builder.connect(a, conn).unwrap();

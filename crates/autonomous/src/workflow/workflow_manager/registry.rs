@@ -89,7 +89,7 @@ impl WorkflowManager {
         I: Send + Sync + 'static,
         O: Send + Sync + 'static,
         F: Fn(I) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<O, WorkflowError>> + Send,
+        Fut: Future<Output = Result<O, WorkflowError>> + Send,
     {
         let wid = WorkflowId::from(id);
         let name = wid.name().to_string();
@@ -133,7 +133,7 @@ impl WorkflowManager {
         I: Send + Sync + 'static,
         O: Send + Sync + 'static,
         F: Fn(I, &ExecutionContext) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = Result<O, WorkflowError>> + Send,
+        Fut: Future<Output = Result<O, WorkflowError>> + Send,
     {
         let wid = WorkflowId::from(id);
         let name = wid.name().to_string();

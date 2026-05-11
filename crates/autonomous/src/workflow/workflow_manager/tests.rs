@@ -85,8 +85,8 @@ fn cycle_detected_across_workflows() {
     let mut builder_a = DagBuilder::new();
     let sub_b = builder_a.add_sub_workflow(
         "B",
-        std::any::TypeId::of::<i32>(),
-        std::any::TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
     );
     builder_a.set_entry(sub_b).unwrap();
     builder_a.set_exit(sub_b).unwrap();
@@ -96,8 +96,8 @@ fn cycle_detected_across_workflows() {
     let mut builder_b = DagBuilder::new();
     let sub_a = builder_b.add_sub_workflow(
         "A",
-        std::any::TypeId::of::<i32>(),
-        std::any::TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
     );
     builder_b.set_entry(sub_a).unwrap();
     builder_b.set_exit(sub_a).unwrap();
@@ -119,8 +119,8 @@ fn self_reference_rejected() {
     let mut builder = DagBuilder::new();
     let sub = builder.add_sub_workflow(
         "self_ref",
-        std::any::TypeId::of::<i32>(),
-        std::any::TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
     );
     builder.set_entry(sub).unwrap();
     builder.set_exit(sub).unwrap();
@@ -142,8 +142,8 @@ fn missing_sub_workflow_rejected() {
     let mut builder = DagBuilder::new();
     let sub = builder.add_sub_workflow(
         "nonexistent",
-        std::any::TypeId::of::<i32>(),
-        std::any::TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
     );
     builder.set_entry(sub).unwrap();
     builder.set_exit(sub).unwrap();
@@ -166,8 +166,8 @@ async fn unvalidated_workflow_rejected() {
     let mut builder = DagBuilder::new();
     let sub = builder.add_sub_workflow(
         "missing",
-        std::any::TypeId::of::<i32>(),
-        std::any::TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
+        TypeId::of::<i32>(),
     );
     builder.set_entry(sub).unwrap();
     builder.set_exit(sub).unwrap();

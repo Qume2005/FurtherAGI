@@ -31,7 +31,7 @@
 //! }
 //!
 //! # #[tokio::main]
-//! # async fn example() -> Result<(), WorkflowError> {
+//! # async fn example() -> anyhow::Result<()> {
 //! let mut builder = DagBuilder::new();
 //! let a = builder.add_workflow("double", into_erased(Double));
 //! let b = builder.add_workflow("double2", into_erased(Double));
@@ -60,7 +60,6 @@ use std::collections::{HashMap, HashSet};
 use tracing::instrument;
 
 use super::dag::NodeKind;
-use super::error::WorkflowError;
 use super::model::{ExecutionContext, NodeId};
 use super::dag::WorkflowDag;
 

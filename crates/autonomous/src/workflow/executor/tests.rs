@@ -1,5 +1,6 @@
 use super::*;
 use crate::workflow::dag::DagBuilder;
+use crate::workflow::error::WorkflowError;
 use crate::workflow::definition::{into_erased, Workflow};
 use crate::workflow::model::State;
 use crate::workflow::platform::NullPlatform;

@@ -52,7 +52,7 @@ impl DagBuilder {
     /// Add a workflow node from a pure async closure (no context). Returns its `NodeId`.
     ///
     /// The closure takes only the input and returns a future. Use [`add_with_ctx`](Self::add_with_ctx)
-    /// if you need access to [`ExecutionContext`](super::super::model::ExecutionContext).
+    /// if you need access to [`ExecutionContext`](ExecutionContext).
     ///
     /// ID uses `"namespace@Name"` format; the name part becomes the workflow name.
     ///
@@ -80,7 +80,7 @@ impl DagBuilder {
         self.add_workflow(wid, from_fn(name, move |input: I, _ctx: &ExecutionContext| f(input)))
     }
 
-    /// Add a workflow node from an async closure that needs [`ExecutionContext`](super::super::model::ExecutionContext).
+    /// Add a workflow node from an async closure that needs [`ExecutionContext`](ExecutionContext).
     /// Returns its `NodeId`.
     ///
     /// Use this when the workflow needs to read/write shared state via `ctx.state`.
@@ -115,7 +115,7 @@ impl DagBuilder {
     /// Add a pre-built type-erased workflow node. Returns its `NodeId`.
     ///
     /// Use this when you have a `Box<dyn ErasedWorkflow>` from [`into_erased`](super::super::definition::into_erased)
-    /// or [`from_fn`](super::super::definition::from_fn).
+    /// or [`from_fn`](from_fn).
     pub fn add_erased(&mut self, id: &str, workflow: Box<dyn ErasedWorkflow>) -> NodeId {
         self.add_workflow(WorkflowId::from(id), workflow)
     }

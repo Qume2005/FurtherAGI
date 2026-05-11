@@ -1,3 +1,5 @@
+use anyhow::{bail, Context};
+
 use super::*;
 
 impl Executor {
@@ -25,8 +27,8 @@ impl Executor {
         node_id: NodeId,
         input: BoxedValue,
         ctx: &ExecutionContext,
-    ) -> Result<BoxedValue, WorkflowError> {
-        let node = dag.get_node(node_id).ok_or(WorkflowError::NodeNotFound(node_id))?;
+    ) -> anyhow::Result<BoxedValue> {
+        let node = dag.get_node(node_id).with_context(|| format!("node not found: {node_id:?}"))?;
 
         match &node.kind {
             NodeKind::Broadcast => {
@@ -55,18 +57,24 @@ impl Executor {
             }
             NodeKind::Conditional { .. } => {
                 if let Some(ref wf) = node.workflow {
-                    let result = wf.execute_erased(input, ctx).await?;
+                    let result = wf
+                        .execute_erased(input, ctx)
+                        .await
+                        .context(format!("conditional predicate failed at node {node_id:?}"))?;
                     Ok(result)
                 } else {
-                    Err(WorkflowError::execution(node_id, "conditional has no predicate".to_string()))
+                    bail!("conditional node {node_id:?} has no predicate")
                 }
             }
             NodeKind::Workflow(_) | NodeKind::SubWorkflow(_) => {
                 if let Some(ref wf) = node.workflow {
-                    let result = wf.execute_erased(input, ctx).await?;
+                    let result = wf
+                        .execute_erased(input, ctx)
+                        .await
+                        .context(format!("workflow execution failed at node {node_id:?}"))?;
                     Ok(result)
                 } else {
-                    Err(WorkflowError::execution(node_id, "node has no workflow implementation".to_string()))
+                    bail!("node {node_id:?} has no workflow implementation")
                 }
             }
             NodeKind::Error { .. } => {
@@ -83,39 +91,42 @@ impl Executor {
         body_exit: NodeId,
         results: &'a mut HashMap<NodeId, BoxedValue>,
         ctx: &'a ExecutionContext,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BoxedValue, WorkflowError>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<BoxedValue>> + 'a>> {
         Box::pin(async move {
-        let topo = dag.topo_order();
-        let start = topo.iter().position(|&id| id == body_entry).unwrap_or(0);
-        let end = topo.iter().position(|&id| id == body_exit).unwrap_or(topo.len() - 1);
+            let topo = dag.topo_order();
+            let start = topo.iter().position(|&id| id == body_entry).unwrap_or(0);
+            let end = topo.iter().position(|&id| id == body_exit).unwrap_or(topo.len() - 1);
 
-        for i in start..=end {
-            let node_id = topo[i];
+            for i in start..=end {
+                let node_id = topo[i];
 
-            // Get input: either seeded (for body_entry) or from predecessor.
-            let incoming = dag.incoming(node_id);
-            let input = if incoming.is_empty() {
-                // Body entry: take from seeded results.
-                results
-                    .remove(&node_id)
-                    .ok_or(WorkflowError::NodeNotFound(node_id))?
-            } else {
-                let from = incoming[0].from;
-                results.remove(&from).ok_or(WorkflowError::NodeNotFound(from))?
-            };
+                // Get input: either seeded (for body_entry) or from predecessor.
+                let incoming = dag.incoming(node_id);
+                let input = if incoming.is_empty() {
+                    // Body entry: take from seeded results.
+                    results
+                        .remove(&node_id)
+                        .with_context(|| format!("node not found: {node_id:?}"))?
+                } else {
+                    let from = incoming[0].from;
+                    results.remove(&from).with_context(|| format!("node not found: {from:?}"))?
+                };
 
-            // Execute the node's workflow.
-            let node = dag.get_node(node_id).ok_or(WorkflowError::NodeNotFound(node_id))?;
-            if let Some(ref wf) = node.workflow {
-                let result = wf.execute_erased(input, ctx).await?;
-                results.insert(node_id, result);
-            } else {
-                // No workflow (e.g., structural node) — pass through.
-                results.insert(node_id, input);
+                // Execute the node's workflow.
+                let node = dag.get_node(node_id).with_context(|| format!("node not found: {node_id:?}"))?;
+                if let Some(ref wf) = node.workflow {
+                    let result = wf
+                        .execute_erased(input, ctx)
+                        .await
+                        .context(format!("workflow execution failed at node {node_id:?}"))?;
+                    results.insert(node_id, result);
+                } else {
+                    // No workflow (e.g., structural node) — pass through.
+                    results.insert(node_id, input);
+                }
             }
-        }
 
-        results.remove(&body_exit).ok_or(WorkflowError::NodeNotFound(body_exit))
+            results.remove(&body_exit).with_context(|| format!("node not found: {body_exit:?}"))
         })
     }
 
@@ -123,15 +134,18 @@ impl Executor {
     pub(super) async fn try_error_handler(
         dag: &WorkflowDag,
         failed_node: NodeId,
-        error: &WorkflowError,
+        error: &anyhow::Error,
         ctx: &ExecutionContext,
-    ) -> Result<Option<BoxedValue>, WorkflowError> {
+    ) -> anyhow::Result<Option<BoxedValue>> {
         for node in dag.nodes().values() {
             if let NodeKind::Error { paired_with } = &node.kind {
                 if *paired_with == failed_node {
                     if let Some(ref handler) = node.workflow {
                         let error_input: BoxedValue = Box::new(error.to_string());
-                        let result = handler.execute_erased(error_input, ctx).await?;
+                        let result = handler
+                            .execute_erased(error_input, ctx)
+                            .await
+                            .context(format!("error handler failed for node {failed_node:?}"))?;
                         return Ok(Some(result));
                     }
                 }

@@ -39,7 +39,9 @@ impl WorkflowManager {
 
         if let Some(ref dag) = entry.dag {
             // Composite workflow: execute its DAG.
-            Executor::execute(dag, input, ctx).await
+            Executor::execute(dag, input, ctx).await.map_err(|source| {
+                WorkflowError::ExecutionError { node: NodeId(0), source }
+            })
         } else if let Some(ref wf) = entry.workflow {
             // Leaf workflow: execute directly.
             let output_type = wf.output_type_id();

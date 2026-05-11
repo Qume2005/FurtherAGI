@@ -12,7 +12,7 @@ use autonomous::workflow::model::{ExecutionContext, State};
 use autonomous::workflow::platform::NullPlatform;
 
 #[tokio::main]
-async fn main() -> Result<(), WorkflowError> {
+async fn main() -> anyhow::Result<()> {
     let ctx = ExecutionContext {
         state: Arc::new(State::new()),
         platform: Arc::new(NullPlatform::new()),

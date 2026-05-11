@@ -1,3 +1,5 @@
+use anyhow::Context;
+
 use super::*;
 
 /// DAG 执行的结果。
@@ -34,14 +36,10 @@ impl Executor {
         dag: &WorkflowDag,
         input: BoxedValue,
         ctx: &ExecutionContext,
-    ) -> Result<ExecutionResult, WorkflowError> {
+    ) -> anyhow::Result<ExecutionResult> {
         let topo = dag.topo_order();
-        let entry = dag.entry_node().ok_or_else(|| {
-            WorkflowError::ValidationError("DAG has no entry node".into())
-        })?;
-        let exit = dag.exit_node().ok_or_else(|| {
-            WorkflowError::ValidationError("DAG has no exit node".into())
-        })?;
+        let entry = dag.entry_node().context("DAG has no entry node")?;
+        let exit = dag.exit_node().context("DAG has no exit node")?;
 
         // Collect nodes that belong to loop bodies — they are executed inside execute_node
         // for Loop nodes, not in the main topological walk.
@@ -95,18 +93,18 @@ impl Executor {
             });
 
             // Gather inputs for all nodes in this level before executing concurrently.
-            let mut level_inputs: HashMap<NodeId, Result<BoxedValue, WorkflowError>> = HashMap::new();
+            let mut level_inputs: HashMap<NodeId, anyhow::Result<BoxedValue>> = HashMap::new();
             for &node_id in &level {
                 let incoming = dag.incoming(node_id);
                 let input = if incoming.is_empty() {
-                    results.remove(&node_id).ok_or(WorkflowError::NodeNotFound(node_id))
+                    results.remove(&node_id).with_context(|| format!("node not found: {node_id:?}"))
                 } else {
                     let from = incoming[0].from;
                     if let Some(clone_fn) = dag.clone_fn(from) {
-                        let val = results.get(&from).ok_or(WorkflowError::NodeNotFound(from))?;
+                        let val = results.get(&from).with_context(|| format!("node not found: {from:?}"))?;
                         Ok(clone_fn(val.as_ref()))
                     } else {
-                        results.remove(&from).ok_or(WorkflowError::NodeNotFound(from))
+                        results.remove(&from).with_context(|| format!("node not found: {from:?}"))
                     }
                 };
                 level_inputs.insert(node_id, input);
@@ -176,14 +174,12 @@ impl Executor {
             }
         }
 
-        let output = results.remove(&exit).ok_or(WorkflowError::NodeNotFound(exit))?;
+        let output = results.remove(&exit).with_context(|| format!("node not found: {exit:?}"))?;
 
         let output_type = dag
             .get_node(exit)
             .and_then(|n| n.output_type)
-            .ok_or_else(|| {
-                WorkflowError::ValidationError("exit node has no output type".into())
-            })?;
+            .context("exit node has no output type")?;
 
         Ok(ExecutionResult { output, output_type })
     }

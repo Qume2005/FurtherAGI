@@ -40,6 +40,6 @@ name = "workflow_docker_python"
 path = "src/bin/workflow/docker_python.rs"
 
 [dependencies]
+anyhow = "1"
 autonomous = { path = "../autonomous" }
 tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
