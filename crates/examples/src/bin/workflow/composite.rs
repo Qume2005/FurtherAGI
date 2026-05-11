@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::model::{ExecutionContext, State};
+use autonomous::workflow::model::ExecutionContext;
 use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
 
@@ -14,7 +14,6 @@ use autonomous::workflow::platform::NullPlatform;
 async fn main() -> Result<(), WorkflowError> {
     let mgr = WorkflowManager::new();
     let ctx = ExecutionContext {
-        state: Arc::new(State::new()),
         platform: Arc::new(NullPlatform::new()),
     };
 

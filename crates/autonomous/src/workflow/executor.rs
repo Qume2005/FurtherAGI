@@ -16,7 +16,7 @@
 //! use autonomous::workflow::executor::Executor;
 //! use autonomous::workflow::dag::DagBuilder;
 //! use autonomous::workflow::definition::{Workflow, into_erased};
-//! use autonomous::workflow::model::{State, ExecutionContext};
+//! use autonomous::workflow::model::ExecutionContext;
 //! use autonomous::workflow::platform::NullPlatform;
 //! use autonomous::workflow::error::WorkflowError;
 //! use async_trait::async_trait;
@@ -40,7 +40,7 @@
 //! builder.set_exit(b).unwrap();
 //! let dag = builder.build().unwrap();
 //!
-//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
+//! let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
 //!
 //! let result = Executor::execute(&dag, Box::new(3i32), &ctx).await?;
 //! let output: &i32 = result.output.downcast_ref::<i32>().unwrap();

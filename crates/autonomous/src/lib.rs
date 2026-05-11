@@ -8,13 +8,13 @@
 //! - **Workflow** — 强类型的「输入 → 处理 → 输出」管道，由 [`workflow::definition::Workflow`] trait 定义
 //! - **DAG** — 由 [`workflow::dag::WorkflowDag`] 表示的有向无环图，描述组合工作流的拓扑
 //! - **WorkflowManager** — 中央注册器，管理所有工作流的生命周期和依赖校验
-//! - **State / WorkPlatform** — 运行时上下文，提供状态管理和工作平台
+//! - **WorkPlatform** — 运行时上下文，提供工作平台
 //!
 //! ## 快速开始
 //!
 //! ```rust
 //! use autonomous::workflow::workflow_manager::WorkflowManager;
-//! use autonomous::workflow::model::{State, ExecutionContext};
+//! use autonomous::workflow::model::ExecutionContext;
 //! use autonomous::workflow::platform::NullPlatform;
 //! use autonomous::workflow::error::WorkflowError;
 //! use std::sync::Arc;
@@ -27,7 +27,7 @@
 //!     Ok::<i32, WorkflowError>(input * 2)
 //! })?;
 //!
-//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
+//! let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
 //!
 //! let result: i32 = mgr.execute_typed("builtin@Double", 21, &ctx).await?;
 //! assert_eq!(result, 42);

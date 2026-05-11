@@ -16,7 +16,7 @@ use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
 use autonomous::workflow::platform::{DockerPlatform, WorkPlatform};
-use autonomous::workflow::model::{ExecutionContext, State};
+use autonomous::workflow::model::ExecutionContext;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -28,9 +28,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let platform = DockerPlatform::create("python:3.12-slim").await?;
     println!("    容器已启动，工作目录: {:?}\n", platform.workspace_root());
 
-    let state = Arc::new(State::new());
     let platform: Arc<dyn WorkPlatform> = Arc::new(platform);
-    let ctx = ExecutionContext { state: state.clone(), platform: platform.clone() };
+    let ctx = ExecutionContext { platform: platform.clone() };
 
     // ── 示例 A: 直接执行 Python 代码 ────────────────────────
     println!("[2] 直接执行 Python...");

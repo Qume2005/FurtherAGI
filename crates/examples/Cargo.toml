@@ -28,10 +28,6 @@ name = "workflow_error_handler"
 path = "src/bin/workflow/error_handler.rs"
 
 [[bin]]
-name = "workflow_stateful"
-path = "src/bin/workflow/stateful.rs"
-
-[[bin]]
 name = "workflow_config_driven"
 path = "src/bin/workflow/config_driven.rs"
 

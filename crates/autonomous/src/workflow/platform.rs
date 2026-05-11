@@ -19,11 +19,11 @@
 //!
 //! ```rust
 //! use autonomous::workflow::platform::{NullPlatform, WorkPlatform};
-//! use autonomous::workflow::model::{State, ExecutionContext};
+//! use autonomous::workflow::model::ExecutionContext;
 //! use std::path::Path;
 //! use std::sync::Arc;
 //!
-//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
+//! let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
 //! // platform.workspace_root() → 临时目录
 //! // platform.run_command() → 空操作
 //! ```

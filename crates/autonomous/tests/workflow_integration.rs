@@ -7,11 +7,8 @@ use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
 use std::sync::Arc;
 
-use autonomous::workflow::model::State;
-
 fn make_ctx() -> ExecutionContext {
     ExecutionContext {
-        state: Arc::new(State::new()),
         platform: Arc::new(NullPlatform::new()),
     }
 }
@@ -147,29 +144,6 @@ async fn e2e_conditional_predicate() {
 
     let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
     assert_eq!(*result.output.downcast_ref::<i32>().unwrap(), 100);
-}
-
-/// WorkflowManager with state: verify State is accessible during execution.
-#[tokio::test]
-async fn e2e_stateful_workflow() {
-    let state = Arc::new(State::new());
-    let ctx = ExecutionContext { state: state.clone(), platform: Arc::new(NullPlatform::new()) };
-
-    let mgr = WorkflowManager::new();
-    mgr.add_with_ctx("stateful", |input: i32, ctx: &ExecutionContext| {
-        let prev = ctx.state.get::<i32>("accumulator").unwrap_or(0);
-        let new_val = prev + input;
-        ctx.state.set("accumulator", new_val);
-        async move { Ok::<i32, WorkflowError>(new_val) }
-    }).unwrap();
-
-    let r1: i32 = mgr.execute_typed("stateful", 10, &ctx).await.unwrap();
-    assert_eq!(r1, 10);
-
-    let r2: i32 = mgr.execute_typed("stateful", 20, &ctx).await.unwrap();
-    assert_eq!(r2, 30);
-
-    assert_eq!(state.get::<i32>("accumulator"), Some(30));
 }
 
 /// Loop inside a composite workflow registered in the manager.

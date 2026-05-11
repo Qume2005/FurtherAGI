@@ -6,7 +6,7 @@
 //!
 //! ```rust
 //! use autonomous::workflow::workflow_manager::WorkflowManager;
-//! use autonomous::workflow::model::{State, ExecutionContext};
+//! use autonomous::workflow::model::ExecutionContext;
 //! use autonomous::workflow::platform::NullPlatform;
 //! use autonomous::workflow::error::WorkflowError;
 //! use std::sync::Arc;
@@ -18,7 +18,7 @@
 //!     Ok::<i32, WorkflowError>(input * 2)
 //! })?;
 //!
-//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
+//! let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
 //! let result: i32 = mgr.execute_typed("builtin@Double", 21, &ctx).await?;
 //! assert_eq!(result, 42);
 //! # Ok(())
@@ -29,7 +29,7 @@
 //!
 //! | 模块 | 说明 |
 //! |------|------|
-//! | [`model`] | 基础类型：`NodeId`、`WorkflowId`、`State`、`ExecutionContext` |
+//! | [`model`] | 基础类型：`NodeId`、`WorkflowId`、`ExecutionContext` |
 //! | [`platform`] | 工作平台：`WorkPlatform` trait、`NullPlatform`、`LocalPlatform`、`DockerPlatform` |
 //! | [`error`] | 统一错误类型 `WorkflowError` |
 //! | [`definition`] | 核心 trait：`Workflow<I, O>`（用户实现）和 `ErasedWorkflow`（内部类型擦除） |

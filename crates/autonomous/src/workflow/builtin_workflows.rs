@@ -212,13 +212,11 @@ impl<T: Send + Sync + 'static> Workflow<T, T> for Delay<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workflow::model::State;
     use crate::workflow::platform::NullPlatform;
     use std::sync::Arc;
 
     fn make_ctx() -> ExecutionContext {
         ExecutionContext {
-            state: Arc::new(State::new()),
             platform: Arc::new(NullPlatform::new()),
         }
     }

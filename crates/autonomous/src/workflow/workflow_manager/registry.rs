@@ -56,7 +56,7 @@ impl WorkflowManager {
     /// 添加工作流（纯闭包，不需要 `ExecutionContext`）。
     ///
     /// 最常用的注册方式。闭包只接收输入，返回输出。
-    /// 如果需要访问 `ctx.state`，使用 [`add_with_ctx`](Self::add_with_ctx)。
+    /// 如果需要访问 `ctx`，使用 [`add_with_ctx`](Self::add_with_ctx)。
     ///
     /// ID 使用 `"namespace@Name"` 格式，工作流名称自动取 name 部分。
     ///
@@ -64,7 +64,7 @@ impl WorkflowManager {
     ///
     /// ```rust
     /// use autonomous::workflow::workflow_manager::WorkflowManager;
-    /// use autonomous::workflow::model::{State, ExecutionContext};
+    /// use autonomous::workflow::model::ExecutionContext;
     /// use autonomous::workflow::platform::NullPlatform;
     /// use autonomous::workflow::error::WorkflowError;
     /// use std::sync::Arc;
@@ -77,7 +77,7 @@ impl WorkflowManager {
     ///     Ok::<i32, WorkflowError>(input * 2)
     /// })?;
     ///
-    /// let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
+    /// let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
     ///
     /// let result: i32 = mgr.execute_typed("builtin@Double", 21, &ctx).await?;
     /// assert_eq!(result, 42);
@@ -98,14 +98,14 @@ impl WorkflowManager {
 
     /// 添加工作流（需要 `ExecutionContext` 的闭包）。
     ///
-    /// 用于需要读写共享状态 `ctx.state` 的工作流。
+    /// 用于需要访问 `ctx.platform` 的工作流。
     /// 简单场景优先使用 [`add`](Self::add)。
     ///
     /// # 示例
     ///
     /// ```rust
     /// use autonomous::workflow::workflow_manager::WorkflowManager;
-    /// use autonomous::workflow::model::{State, ExecutionContext};
+    /// use autonomous::workflow::model::ExecutionContext;
     /// use autonomous::workflow::platform::NullPlatform;
     /// use autonomous::workflow::error::WorkflowError;
     /// use std::sync::Arc;
@@ -114,17 +114,15 @@ impl WorkflowManager {
     /// # async fn example() -> Result<(), WorkflowError> {
     /// let mgr = WorkflowManager::new();
     ///
-    /// mgr.add_with_ctx("builtin@Accumulate",
-    ///     |input: i32, ctx: &ExecutionContext| {
-    ///         let prev = ctx.state.get::<i32>("acc").unwrap_or(0);
-    ///         ctx.state.set("acc", prev + input);
-    ///         async move { Ok::<i32, WorkflowError>(prev + input) }
+    /// mgr.add_with_ctx("builtin@CtxDouble",
+    ///     |input: i32, _ctx: &ExecutionContext| {
+    ///         async move { Ok::<i32, WorkflowError>(input * 2) }
     ///     })?;
     ///
-    /// let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
+    /// let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
     ///
-    /// let r: i32 = mgr.execute_typed("builtin@Accumulate", 10, &ctx).await?;
-    /// assert_eq!(r, 10);
+    /// let r: i32 = mgr.execute_typed("builtin@CtxDouble", 10, &ctx).await?;
+    /// assert_eq!(r, 20);
     /// # Ok(())
     /// # }
     /// ```

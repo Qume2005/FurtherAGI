@@ -250,7 +250,6 @@ impl<I: Send + Sync + 'static, O: Send + Sync + 'static, W: Workflow<I, O>> Eras
 mod tests {
     use super::*;
     use crate::workflow::platform::NullPlatform;
-    use crate::workflow::model::State;
     use std::sync::Arc;
 
     struct AddOne;
@@ -277,7 +276,6 @@ mod tests {
 
     fn make_ctx() -> ExecutionContext {
         ExecutionContext {
-            state: Arc::new(State::new()),
             platform: Arc::new(NullPlatform::new()),
         }
     }

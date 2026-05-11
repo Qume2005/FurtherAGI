@@ -5,9 +5,7 @@ use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryR
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
 use autonomous::workflow::definition::{into_erased, Workflow};
-use autonomous::workflow::model::{
-    ExecutionContext, State,
-};
+use autonomous::workflow::model::ExecutionContext;
 use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
 use std::sync::Arc;
@@ -112,7 +110,6 @@ impl Workflow<String, i32> for RecoverDefault {
 
 fn make_ctx() -> ExecutionContext {
     ExecutionContext {
-        state: Arc::new(State::new()),
         platform: Arc::new(NullPlatform::new()),
     }
 }

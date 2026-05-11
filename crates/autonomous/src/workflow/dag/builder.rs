@@ -83,7 +83,7 @@ impl DagBuilder {
     /// Add a workflow node from an async closure that needs [`ExecutionContext`](ExecutionContext).
     /// Returns its `NodeId`.
     ///
-    /// Use this when the workflow needs to read/write shared state via `ctx.state`.
+    /// Use this when the workflow needs access to the execution platform.
     /// For simple workflows that don't need context, prefer [`add`](Self::add).
     ///
     /// # Examples

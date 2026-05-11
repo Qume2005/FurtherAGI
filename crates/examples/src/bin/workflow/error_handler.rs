@@ -8,13 +8,12 @@ use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
 use autonomous::workflow::definition::from_fn;
-use autonomous::workflow::model::{ExecutionContext, State};
+use autonomous::workflow::model::ExecutionContext;
 use autonomous::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let ctx = ExecutionContext {
-        state: Arc::new(State::new()),
         platform: Arc::new(NullPlatform::new()),
     };
 

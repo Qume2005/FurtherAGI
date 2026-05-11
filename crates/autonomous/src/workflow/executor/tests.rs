@@ -2,7 +2,6 @@ use super::*;
 use crate::workflow::dag::DagBuilder;
 use crate::workflow::error::WorkflowError;
 use crate::workflow::definition::{into_erased, Workflow};
-use crate::workflow::model::State;
 use crate::workflow::platform::NullPlatform;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -27,7 +26,6 @@ impl Workflow<i32, i32> for MulTwo {
 
 fn make_ctx() -> ExecutionContext {
     ExecutionContext {
-        state: Arc::new(State::new()),
         platform: Arc::new(NullPlatform::new()),
     }
 }
