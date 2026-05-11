@@ -21,6 +21,7 @@
 //! use autonomous::workflow::types::{State, ExecutionContext};
 //! use autonomous::workflow::platform::NullPlatform;
 //! use autonomous::workflow::error::WorkflowError;
+//! use std::sync::Arc;
 //!
 //! # #[tokio::main]
 //! # async fn example() -> Result<(), WorkflowError> {
@@ -32,9 +33,7 @@
 //! })?;
 //!
 //! // 强类型执行
-//! let state = State::new();
-//! let platform = NullPlatform::new();
-//! let ctx = ExecutionContext { state: &state, platform: &platform };
+//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
 //!
 //! let result: i32 = mgr.execute_typed("builtin@Double", 21, &ctx).await?;
 //! assert_eq!(result, 42);
@@ -129,6 +128,7 @@ impl WorkflowManager {
     /// use autonomous::workflow::types::{State, ExecutionContext};
     /// use autonomous::workflow::platform::NullPlatform;
     /// use autonomous::workflow::error::WorkflowError;
+    /// use std::sync::Arc;
     ///
     /// # #[tokio::main]
     /// # async fn example() -> Result<(), WorkflowError> {
@@ -138,9 +138,7 @@ impl WorkflowManager {
     ///     Ok::<i32, WorkflowError>(input * 2)
     /// })?;
     ///
-    /// let state = State::new();
-    /// let platform = NullPlatform::new();
-    /// let ctx = ExecutionContext { state: &state, platform: &platform };
+    /// let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
     ///
     /// let result: i32 = mgr.execute_typed("builtin@Double", 21, &ctx).await?;
     /// assert_eq!(result, 42);
@@ -156,7 +154,7 @@ impl WorkflowManager {
     {
         let wid = WorkflowId::from(id);
         let name = wid.name().to_string();
-        self.register_node(wid, from_fn(name, move |input: I, _ctx: &ExecutionContext<'_>| f(input)))
+        self.register_node(wid, from_fn(name, move |input: I, _ctx: &ExecutionContext| f(input)))
     }
 
     /// 添加工作流（需要 `ExecutionContext` 的闭包）。
@@ -171,21 +169,20 @@ impl WorkflowManager {
     /// use autonomous::workflow::types::{State, ExecutionContext};
     /// use autonomous::workflow::platform::NullPlatform;
     /// use autonomous::workflow::error::WorkflowError;
+    /// use std::sync::Arc;
     ///
     /// # #[tokio::main]
     /// # async fn example() -> Result<(), WorkflowError> {
     /// let mgr = WorkflowManager::new();
     ///
     /// mgr.add_with_ctx("builtin@Accumulate",
-    ///     |input: i32, ctx: &ExecutionContext<'_>| {
+    ///     |input: i32, ctx: &ExecutionContext| {
     ///         let prev = ctx.state.get::<i32>("acc").unwrap_or(0);
     ///         ctx.state.set("acc", prev + input);
     ///         async move { Ok::<i32, WorkflowError>(prev + input) }
     ///     })?;
     ///
-    /// let state = State::new();
-    /// let platform = NullPlatform::new();
-    /// let ctx = ExecutionContext { state: &state, platform: &platform };
+    /// let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
     ///
     /// let r: i32 = mgr.execute_typed("builtin@Accumulate", 10, &ctx).await?;
     /// assert_eq!(r, 10);
@@ -196,7 +193,7 @@ impl WorkflowManager {
     where
         I: Send + Sync + 'static,
         O: Send + Sync + 'static,
-        F: Fn(I, &ExecutionContext<'_>) -> Fut + Send + Sync + 'static,
+        F: Fn(I, &ExecutionContext) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = Result<O, WorkflowError>> + Send,
     {
         let wid = WorkflowId::from(id);
@@ -394,7 +391,7 @@ impl WorkflowManager {
         &self,
         id: impl Into<WorkflowId>,
         input: Box<dyn Any + Send + Sync>,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, WorkflowError> {
         let id = id.into();
         self.execute_inner(&id, input, ctx).await
@@ -405,7 +402,7 @@ impl WorkflowManager {
         &self,
         id: &WorkflowId,
         input: Box<dyn Any + Send + Sync>,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, WorkflowError> {
         let entry = self.workflows.get(id).ok_or_else(|| {
             WorkflowError::WorkflowNotFound(id.clone())
@@ -439,7 +436,7 @@ impl WorkflowManager {
         &self,
         id: impl Into<WorkflowId>,
         input: I,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<O, WorkflowError> {
         let id = id.into();
         let entry = self.workflows.get(&id).ok_or_else(|| {
@@ -504,13 +501,13 @@ mod tests {
     use crate::workflow::types::State;
     use crate::workflow::platform::NullPlatform;
     use async_trait::async_trait;
-    use std::sync::LazyLock;
+    use std::sync::Arc;
 
     struct AddOne;
     #[async_trait]
     impl Workflow<i32, i32> for AddOne {
         fn name(&self) -> &str { "add_one" }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
             Ok(input + 1)
         }
     }
@@ -519,18 +516,15 @@ mod tests {
     #[async_trait]
     impl Workflow<i32, i32> for MulTwo {
         fn name(&self) -> &str { "mul_two" }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
             Ok(input * 2)
         }
     }
 
-    static STATE: LazyLock<State> = LazyLock::new(State::new);
-    static PLATFORM: LazyLock<NullPlatform> = LazyLock::new(NullPlatform::new);
-
-    fn make_ctx() -> ExecutionContext<'static> {
+    fn make_ctx() -> ExecutionContext {
         ExecutionContext {
-            state: &STATE,
-            platform: &*PLATFORM,
+            state: Arc::new(State::new()),
+            platform: Arc::new(NullPlatform::new()),
         }
     }
 

@@ -29,7 +29,7 @@ use super::workflow_registry::WorkflowFactoryRegistry;
 /// #[async_trait]
 /// impl Workflow<i32, i32> for AddOne {
 ///     fn name(&self) -> &str { "add_one" }
-///     async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>)
+///     async fn execute(&self, input: i32, _ctx: &ExecutionContext)
 ///         -> Result<i32, WorkflowError> { Ok(input + 1) }
 /// }
 ///

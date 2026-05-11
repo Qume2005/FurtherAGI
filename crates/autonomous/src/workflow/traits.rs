@@ -20,7 +20,7 @@
 //! });
 //!
 //! // 带 ctx：
-//! builder.add_with_ctx("builtin@Log", |input: i32, _ctx: &ExecutionContext<'_>| async move {
+//! builder.add_with_ctx("builtin@Log", |input: i32, _ctx: &ExecutionContext| async move {
 //!     Ok::<i32, WorkflowError>(input)
 //! });
 //! ```
@@ -63,7 +63,7 @@ use super::types::ExecutionContext;
 /// impl Workflow<i32, i32> for Double {
 ///     fn name(&self) -> &str { "double" }
 ///
-///     async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>)
+///     async fn execute(&self, input: i32, _ctx: &ExecutionContext)
 ///         -> Result<i32, WorkflowError>
 ///     {
 ///         Ok(input * 2)
@@ -76,7 +76,7 @@ pub trait Workflow<I: Send + Sync + 'static, O: Send + Sync + 'static>: Send + S
     fn name(&self) -> &str;
 
     /// 执行工作流，接收类型化输入，返回类型化输出。
-    async fn execute(&self, input: I, ctx: &ExecutionContext<'_>) -> Result<O, WorkflowError>;
+    async fn execute(&self, input: I, ctx: &ExecutionContext) -> Result<O, WorkflowError>;
 }
 
 /// 类型擦除的工作流 trait，用于异构存储。
@@ -106,7 +106,7 @@ pub trait ErasedWorkflow: Send + Sync {
     async fn execute_erased(
         &self,
         input: Box<dyn Any + Send + Sync>,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<Box<dyn Any + Send + Sync>, WorkflowError>;
 }
 
@@ -132,7 +132,7 @@ struct WorkflowWrapper<W, I, O> {
 /// #[async_trait]
 /// impl Workflow<i32, i32> for Double {
 ///     fn name(&self) -> &str { "double" }
-///     async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>)
+///     async fn execute(&self, input: i32, _ctx: &ExecutionContext)
 ///         -> Result<i32, WorkflowError> { Ok(input * 2) }
 /// }
 ///
@@ -165,14 +165,14 @@ impl<I, O, F, Fut> Workflow<I, O> for FnWorkflow<I, O, F>
 where
     I: Send + Sync + 'static,
     O: Send + Sync + 'static,
-    F: Fn(I, &ExecutionContext<'_>) -> Fut + Send + Sync + 'static,
+    F: Fn(I, &ExecutionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<O, WorkflowError>> + Send,
 {
     fn name(&self) -> &str {
         &self.name
     }
 
-    async fn execute(&self, input: I, ctx: &ExecutionContext<'_>) -> Result<O, WorkflowError> {
+    async fn execute(&self, input: I, ctx: &ExecutionContext) -> Result<O, WorkflowError> {
         (self.f)(input, ctx).await
     }
 }
@@ -189,7 +189,7 @@ where
 /// use autonomous::workflow::types::ExecutionContext;
 /// use autonomous::workflow::error::WorkflowError;
 ///
-/// let wf = from_fn("add_one", |input: i32, _ctx: &ExecutionContext<'_>| async move {
+/// let wf = from_fn("add_one", |input: i32, _ctx: &ExecutionContext| async move {
 ///     Ok::<i32, WorkflowError>(input + 1)
 /// });
 /// assert_eq!(wf.name(), "add_one");
@@ -198,7 +198,7 @@ pub fn from_fn<I, O, F, Fut>(name: impl Into<String>, f: F) -> Box<dyn ErasedWor
 where
     I: Send + Sync + 'static,
     O: Send + Sync + 'static,
-    F: Fn(I, &ExecutionContext<'_>) -> Fut + Send + Sync + 'static,
+    F: Fn(I, &ExecutionContext) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<O, WorkflowError>> + Send,
 {
     into_erased(FnWorkflow {
@@ -235,7 +235,7 @@ impl<I: Send + Sync + 'static, O: Send + Sync + 'static, W: Workflow<I, O>> Eras
     async fn execute_erased(
         &self,
         input: Box<dyn Any + Send + Sync>,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<Box<dyn Any + Send + Sync>, WorkflowError> {
         let typed_input = input.downcast::<I>().map_err(|_| WorkflowError::DowncastError {
             node: super::types::NodeId(0),
@@ -251,7 +251,7 @@ mod tests {
     use super::*;
     use crate::workflow::platform::NullPlatform;
     use crate::workflow::types::State;
-    use std::sync::LazyLock;
+    use std::sync::Arc;
 
     struct AddOne;
     #[async_trait]
@@ -259,7 +259,7 @@ mod tests {
         fn name(&self) -> &str {
             "add_one"
         }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
             Ok(input + 1)
         }
     }
@@ -270,18 +270,15 @@ mod tests {
         fn name(&self) -> &str {
             "int_to_string"
         }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<String, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<String, WorkflowError> {
             Ok(input.to_string())
         }
     }
 
-    static STATE: LazyLock<State> = LazyLock::new(State::new);
-    static PLATFORM: LazyLock<NullPlatform> = LazyLock::new(NullPlatform::new);
-
-    fn make_ctx() -> ExecutionContext<'static> {
+    fn make_ctx() -> ExecutionContext {
         ExecutionContext {
-            state: &STATE,
-            platform: &*PLATFORM,
+            state: Arc::new(State::new()),
+            platform: Arc::new(NullPlatform::new()),
         }
     }
 
@@ -330,7 +327,7 @@ mod tests {
 
     #[tokio::test]
     async fn from_fn_basic() {
-        let wf = from_fn("add_one", |input: i32, _ctx: &ExecutionContext<'_>| async move {
+        let wf = from_fn("add_one", |input: i32, _ctx: &ExecutionContext| async move {
             Ok::<i32, WorkflowError>(input + 1)
         });
         assert_eq!(wf.name(), "add_one");
@@ -345,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn from_fn_different_types() {
-        let wf = from_fn("to_string", |input: i32, _ctx: &ExecutionContext<'_>| async move {
+        let wf = from_fn("to_string", |input: i32, _ctx: &ExecutionContext| async move {
             Ok::<String, WorkflowError>(input.to_string())
         });
         let ctx = make_ctx();

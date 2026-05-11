@@ -2,6 +2,8 @@
 //!
 //! 运行：`cargo run -p examples --bin workflow_composite`
 
+use std::sync::Arc;
+
 use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::types::{ExecutionContext, State};
@@ -11,11 +13,9 @@ use autonomous::workflow::platform::NullPlatform;
 #[tokio::main]
 async fn main() -> Result<(), WorkflowError> {
     let mgr = WorkflowManager::new();
-    let state = State::new();
-    let platform = NullPlatform::new();
     let ctx = ExecutionContext {
-        state: &state,
-        platform: &platform,
+        state: Arc::new(State::new()),
+        platform: Arc::new(NullPlatform::new()),
     };
 
     let mut builder = DagBuilder::new();

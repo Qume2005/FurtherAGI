@@ -2,6 +2,8 @@
 //!
 //! 运行：`cargo run -p examples --bin workflow_conditional`
 
+use std::sync::Arc;
+
 use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
@@ -11,17 +13,15 @@ use autonomous::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> Result<(), WorkflowError> {
-    let state = State::new();
-    let platform = NullPlatform::new();
     let ctx = ExecutionContext {
-        state: &state,
-        platform: &platform,
+        state: Arc::new(State::new()),
+        platform: Arc::new(NullPlatform::new()),
     };
 
     let mut builder = DagBuilder::new();
     let cond = builder.add_conditional(
         "builtin@IsPositive",
-        from_fn("is_positive", |input: i32, _ctx: &ExecutionContext<'_>| async move {
+        from_fn("is_positive", |input: i32, _ctx: &ExecutionContext| async move {
             Ok::<bool, WorkflowError>(input > 0)
         }),
     )?;

@@ -21,10 +21,9 @@
 //! use autonomous::workflow::platform::{NullPlatform, WorkPlatform};
 //! use autonomous::workflow::types::{State, ExecutionContext};
 //! use std::path::Path;
+//! use std::sync::Arc;
 //!
-//! let platform = NullPlatform::new();
-//! let state = State::new();
-//! let ctx = ExecutionContext { state: &state, platform: &platform };
+//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
 //! // platform.workspace_root() → 临时目录
 //! // platform.run_command() → 空操作
 //! ```

@@ -17,6 +17,7 @@
 //! use autonomous::workflow::types::{State, ExecutionContext};
 //! use autonomous::workflow::platform::NullPlatform;
 //! use autonomous::workflow::error::WorkflowError;
+//! use std::sync::Arc;
 //!
 //! # #[tokio::main]
 //! # async fn example() -> Result<(), WorkflowError> {
@@ -26,9 +27,7 @@
 //!     Ok::<i32, WorkflowError>(input * 2)
 //! })?;
 //!
-//! let state = State::new();
-//! let platform = NullPlatform::new();
-//! let ctx = ExecutionContext { state: &state, platform: &platform };
+//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
 //!
 //! let result: i32 = mgr.execute_typed("builtin@Double", 21, &ctx).await?;
 //! assert_eq!(result, 42);

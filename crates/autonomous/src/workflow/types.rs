@@ -9,6 +9,8 @@
 
 use std::any::Any;
 
+use std::sync::Arc;
+
 use dashmap::DashMap;
 
 use crate::workflow::platform::WorkPlatform;
@@ -184,15 +186,13 @@ impl Default for State {
 /// （如 Python）的工作流才会通过 `platform` 字段调用
 /// [`WorkPlatform`] 的方法。
 ///
-/// # 生命周期
-///
-/// `ExecutionContext<'a>` 的生命周期与执行过程绑定，
-/// 不应在执行完成后持有。
-pub struct ExecutionContext<'a> {
+/// `state` 和 `platform` 均为 `Arc` 包装，可廉价克隆。
+/// 在异步闭包中需要平台时，clone `Arc` 后 move 进 async 块即可。
+pub struct ExecutionContext {
     /// 托管参数存储。
-    pub state: &'a State,
+    pub state: Arc<State>,
     /// 工作平台（命令执行、文件读写、资源管理）。
-    pub platform: &'a dyn WorkPlatform,
+    pub platform: Arc<dyn WorkPlatform>,
 }
 
 #[cfg(test)]

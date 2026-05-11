@@ -261,7 +261,7 @@ impl DagBuilder {
     {
         let wid = WorkflowId::from(id);
         let name = wid.name().to_string();
-        self.add_workflow(wid, from_fn(name, move |input: I, _ctx: &ExecutionContext<'_>| f(input)))
+        self.add_workflow(wid, from_fn(name, move |input: I, _ctx: &ExecutionContext| f(input)))
     }
 
     /// Add a workflow node from an async closure that needs [`ExecutionContext`](super::types::ExecutionContext).
@@ -280,7 +280,7 @@ impl DagBuilder {
     /// let mut builder = DagBuilder::new();
     ///
     /// builder.add_with_ctx("builtin@Log",
-    ///     |input: i32, _ctx: &ExecutionContext<'_>| async move {
+    ///     |input: i32, _ctx: &ExecutionContext| async move {
     ///         Ok::<i32, WorkflowError>(input)
     ///     });
     /// ```
@@ -288,7 +288,7 @@ impl DagBuilder {
     where
         I: Send + Sync + 'static,
         O: Send + Sync + 'static,
-        F: Fn(I, &ExecutionContext<'_>) -> Fut + Send + Sync + 'static,
+        F: Fn(I, &ExecutionContext) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<O, WorkflowError>> + Send,
     {
         let wid = WorkflowId::from(id);
@@ -598,7 +598,7 @@ mod tests {
     #[async_trait]
     impl Workflow<i32, i32> for AddOne {
         fn name(&self) -> &str { "add_one" }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
             Ok(input + 1)
         }
     }
@@ -607,7 +607,7 @@ mod tests {
     #[async_trait]
     impl Workflow<i32, i32> for MulTwo {
         fn name(&self) -> &str { "mul_two" }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
             Ok(input * 2)
         }
     }
@@ -616,7 +616,7 @@ mod tests {
     #[async_trait]
     impl Workflow<i32, bool> for IsPositive {
         fn name(&self) -> &str { "is_positive" }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<bool, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<bool, WorkflowError> {
             Ok(input > 0)
         }
     }
@@ -715,7 +715,7 @@ mod tests {
         #[async_trait]
         impl Workflow<bool, bool> for BoolPass {
             fn name(&self) -> &str { "bool_pass" }
-            async fn execute(&self, input: bool, _ctx: &ExecutionContext<'_>) -> Result<bool, WorkflowError> {
+            async fn execute(&self, input: bool, _ctx: &ExecutionContext) -> Result<bool, WorkflowError> {
                 Ok(input)
             }
         }

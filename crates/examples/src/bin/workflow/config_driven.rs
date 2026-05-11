@@ -2,6 +2,8 @@
 //!
 //! 运行：`cargo run -p examples --bin workflow_config_driven`
 
+use std::sync::Arc;
+
 use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
@@ -42,13 +44,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut workflows = WorkflowFactoryRegistry::new();
     workflows.register("add_one", || from_fn("add_one",
-        |input: i32, _ctx: &ExecutionContext<'_>| async move {
+        |input: i32, _ctx: &ExecutionContext| async move {
             println!("  AddOne({input}) → {}", input + 1);
             Ok::<i32, WorkflowError>(input + 1)
         }
     ));
     workflows.register("mul_two", || from_fn("mul_two",
-        |input: i32, _ctx: &ExecutionContext<'_>| async move {
+        |input: i32, _ctx: &ExecutionContext| async move {
             println!("  MulTwo({input}) → {}", input * 2);
             Ok::<i32, WorkflowError>(input * 2)
         }
@@ -59,9 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Built '{}' with {} nodes", workflow_id.as_str(), dag.topo_order().len());
 
     println!("\n--- Executor 直接执行 ---");
-    let state = State::new();
-    let platform = NullPlatform::new();
-    let ctx = ExecutionContext { state: &state, platform: &platform };
+    let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
 
     let result = Executor::execute(&dag, Box::new(3i32), &ctx).await?;
     let output: &i32 = result.output.downcast_ref::<i32>().unwrap();

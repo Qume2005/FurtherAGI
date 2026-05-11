@@ -2,6 +2,8 @@
 //!
 //! 运行：`cargo run -p examples --bin workflow_broadcast`
 
+use std::sync::Arc;
+
 use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
@@ -10,11 +12,9 @@ use autonomous::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> Result<(), WorkflowError> {
-    let state = State::new();
-    let platform = NullPlatform::new();
     let ctx = ExecutionContext {
-        state: &state,
-        platform: &platform,
+        state: Arc::new(State::new()),
+        platform: Arc::new(NullPlatform::new()),
     };
 
     let mut builder = DagBuilder::new();

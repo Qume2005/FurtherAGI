@@ -2,6 +2,8 @@
 //!
 //! 运行：`cargo run -p examples --bin workflow_stateful`
 
+use std::sync::Arc;
+
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::types::{ExecutionContext, State};
 use autonomous::workflow::workflow_manager::WorkflowManager;
@@ -9,16 +11,15 @@ use autonomous::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> Result<(), WorkflowError> {
-    let state = State::new();
-    let platform = NullPlatform::new();
+    let state = Arc::new(State::new());
     let ctx = ExecutionContext {
-        state: &state,
-        platform: &platform,
+        state: state.clone(),
+        platform: Arc::new(NullPlatform::new()),
     };
 
     let mgr = WorkflowManager::new();
     mgr.add_with_ctx("builtin@Accumulate",
-        |input: i32, ctx: &ExecutionContext<'_>| {
+        |input: i32, ctx: &ExecutionContext| {
             let prev = ctx.state.get::<i32>("accumulator").unwrap_or(0);
             let new_val = prev + input;
             ctx.state.set("accumulator", new_val);

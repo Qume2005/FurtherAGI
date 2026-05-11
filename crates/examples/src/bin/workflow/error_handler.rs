@@ -2,6 +2,8 @@
 //!
 //! 运行：`cargo run -p examples --bin workflow_error_handler`
 
+use std::sync::Arc;
+
 use autonomous::workflow::dag::DagBuilder;
 use autonomous::workflow::error::WorkflowError;
 use autonomous::workflow::executor::Executor;
@@ -11,11 +13,9 @@ use autonomous::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> Result<(), WorkflowError> {
-    let state = State::new();
-    let platform = NullPlatform::new();
     let ctx = ExecutionContext {
-        state: &state,
-        platform: &platform,
+        state: Arc::new(State::new()),
+        platform: Arc::new(NullPlatform::new()),
     };
 
     let mut builder = DagBuilder::new();
@@ -29,7 +29,7 @@ async fn main() -> Result<(), WorkflowError> {
     });
     let _handler = builder.add_error_handler(
         fail,
-        from_fn("error_handler", |error_msg: String, _ctx: &ExecutionContext<'_>| async move {
+        from_fn("error_handler", |error_msg: String, _ctx: &ExecutionContext| async move {
             println!("  ErrorHandler caught: \"{error_msg}\" → 0");
             Ok::<i32, WorkflowError>(0)
         }),

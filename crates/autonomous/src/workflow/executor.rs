@@ -20,12 +20,13 @@
 //! use autonomous::workflow::platform::NullPlatform;
 //! use autonomous::workflow::error::WorkflowError;
 //! use async_trait::async_trait;
+//! use std::sync::Arc;
 //!
 //! struct Double;
 //! #[async_trait]
 //! impl Workflow<i32, i32> for Double {
 //!     fn name(&self) -> &str { "double" }
-//!     async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>)
+//!     async fn execute(&self, input: i32, _ctx: &ExecutionContext)
 //!         -> Result<i32, WorkflowError> { Ok(input * 2) }
 //! }
 //!
@@ -39,9 +40,7 @@
 //! builder.set_exit(b).unwrap();
 //! let dag = builder.build().unwrap();
 //!
-//! let state = State::new();
-//! let platform = NullPlatform::new();
-//! let ctx = ExecutionContext { state: &state, platform: &platform };
+//! let ctx = ExecutionContext { state: Arc::new(State::new()), platform: Arc::new(NullPlatform::new()) };
 //!
 //! let result = Executor::execute(&dag, Box::new(3i32), &ctx).await?;
 //! let output: &i32 = result.output.downcast_ref::<i32>().unwrap();
@@ -99,7 +98,7 @@ impl Executor {
     pub async fn execute(
         dag: &WorkflowDag,
         input: BoxedValue,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, WorkflowError> {
         let topo = dag.topo_order();
         let entry = dag.entry_node().ok_or_else(|| {
@@ -277,7 +276,7 @@ impl Executor {
         dag: &WorkflowDag,
         node_id: NodeId,
         input: BoxedValue,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<BoxedValue, WorkflowError> {
         let node = dag.get_node(node_id).ok_or(WorkflowError::NodeNotFound(node_id))?;
 
@@ -335,7 +334,7 @@ impl Executor {
         body_entry: NodeId,
         body_exit: NodeId,
         results: &'a mut HashMap<NodeId, BoxedValue>,
-        ctx: &'a ExecutionContext<'_>,
+        ctx: &'a ExecutionContext,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BoxedValue, WorkflowError>> + 'a>> {
         Box::pin(async move {
         let topo = dag.topo_order();
@@ -377,7 +376,7 @@ impl Executor {
         dag: &WorkflowDag,
         failed_node: NodeId,
         error: &WorkflowError,
-        ctx: &ExecutionContext<'_>,
+        ctx: &ExecutionContext,
     ) -> Result<Option<BoxedValue>, WorkflowError> {
         for node in dag.nodes().values() {
             if let NodeKind::Error { paired_with } = &node.kind {
@@ -402,13 +401,13 @@ mod tests {
     use crate::workflow::types::State;
     use crate::workflow::platform::NullPlatform;
     use async_trait::async_trait;
-    use std::sync::LazyLock;
+    use std::sync::Arc;
 
     struct AddOne;
     #[async_trait]
     impl Workflow<i32, i32> for AddOne {
         fn name(&self) -> &str { "add_one" }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
             Ok(input + 1)
         }
     }
@@ -417,18 +416,15 @@ mod tests {
     #[async_trait]
     impl Workflow<i32, i32> for MulTwo {
         fn name(&self) -> &str { "mul_two" }
-        async fn execute(&self, input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
             Ok(input * 2)
         }
     }
 
-    static STATE: LazyLock<State> = LazyLock::new(State::new);
-    static PLATFORM: LazyLock<NullPlatform> = LazyLock::new(NullPlatform::new);
-
-    fn make_ctx() -> ExecutionContext<'static> {
+    fn make_ctx() -> ExecutionContext {
         ExecutionContext {
-            state: &STATE,
-            platform: &*PLATFORM,
+            state: Arc::new(State::new()),
+            platform: Arc::new(NullPlatform::new()),
         }
     }
 
@@ -480,7 +476,7 @@ mod tests {
         #[async_trait]
         impl Workflow<i32, i32> for Fail {
             fn name(&self) -> &str { "fail" }
-            async fn execute(&self, _input: i32, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+            async fn execute(&self, _input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
                 Err(WorkflowError::ValidationError("intentional failure".into()))
             }
         }
@@ -489,7 +485,7 @@ mod tests {
         #[async_trait]
         impl Workflow<String, i32> for ErrorHandler {
             fn name(&self) -> &str { "error_handler" }
-            async fn execute(&self, _input: String, _ctx: &ExecutionContext<'_>) -> Result<i32, WorkflowError> {
+            async fn execute(&self, _input: String, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
                 Ok(-1)
             }
         }

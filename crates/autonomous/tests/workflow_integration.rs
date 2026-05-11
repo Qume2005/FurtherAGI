@@ -5,17 +5,14 @@ use autonomous::workflow::traits::from_fn;
 use autonomous::workflow::types::ExecutionContext;
 use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
-use std::sync::LazyLock;
+use std::sync::Arc;
 
 use autonomous::workflow::types::State;
 
-static STATE: LazyLock<State> = LazyLock::new(State::new);
-static PLATFORM: LazyLock<NullPlatform> = LazyLock::new(NullPlatform::new);
-
-fn make_ctx() -> ExecutionContext<'static> {
+fn make_ctx() -> ExecutionContext {
     ExecutionContext {
-        state: &STATE,
-        platform: &*PLATFORM,
+        state: Arc::new(State::new()),
+        platform: Arc::new(NullPlatform::new()),
     }
 }
 
@@ -99,7 +96,7 @@ async fn e2e_error_handler_with_downstream() {
     });
     let _handler = builder.add_error_handler(
         fail,
-        from_fn("default_recovery", |_input: String, _ctx: &ExecutionContext<'_>| async move {
+        from_fn("default_recovery", |_input: String, _ctx: &ExecutionContext| async move {
             Ok::<i32, WorkflowError>(0)
         }),
     ).unwrap();
@@ -128,7 +125,7 @@ async fn e2e_conditional_predicate() {
 
     let cond = builder.add_conditional(
         "is_pos",
-        from_fn("is_positive", |input: i32, _ctx: &ExecutionContext<'_>| async move {
+        from_fn("is_positive", |input: i32, _ctx: &ExecutionContext| async move {
             Ok::<bool, WorkflowError>(input > 0)
         }),
     ).unwrap();
@@ -155,12 +152,11 @@ async fn e2e_conditional_predicate() {
 /// WorkflowManager with state: verify State is accessible during execution.
 #[tokio::test]
 async fn e2e_stateful_workflow() {
-    let state = State::new();
-    let platform = NullPlatform::new();
-    let ctx = ExecutionContext { state: &state, platform: &platform };
+    let state = Arc::new(State::new());
+    let ctx = ExecutionContext { state: state.clone(), platform: Arc::new(NullPlatform::new()) };
 
     let mgr = WorkflowManager::new();
-    mgr.add_with_ctx("stateful", |input: i32, ctx: &ExecutionContext<'_>| {
+    mgr.add_with_ctx("stateful", |input: i32, ctx: &ExecutionContext| {
         let prev = ctx.state.get::<i32>("accumulator").unwrap_or(0);
         let new_val = prev + input;
         ctx.state.set("accumulator", new_val);

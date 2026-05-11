@@ -10,7 +10,7 @@ use autonomous::workflow::types::{
 };
 use autonomous::workflow::workflow_manager::WorkflowManager;
 use autonomous::workflow::platform::NullPlatform;
-use std::sync::LazyLock;
+use std::sync::Arc;
 
 // ── Test workflows ──────────────────────────────────────────
 
@@ -23,7 +23,7 @@ impl Workflow<i32, i32> for AddOne {
     async fn execute(
         &self,
         input: i32,
-        _ctx: &ExecutionContext<'_>,
+        _ctx: &ExecutionContext,
     ) -> Result<i32, WorkflowError> {
         Ok(input + 1)
     }
@@ -38,7 +38,7 @@ impl Workflow<i32, i32> for MulTwo {
     async fn execute(
         &self,
         input: i32,
-        _ctx: &ExecutionContext<'_>,
+        _ctx: &ExecutionContext,
     ) -> Result<i32, WorkflowError> {
         Ok(input * 2)
     }
@@ -53,7 +53,7 @@ impl Workflow<i32, bool> for IsPositive {
     async fn execute(
         &self,
         input: i32,
-        _ctx: &ExecutionContext<'_>,
+        _ctx: &ExecutionContext,
     ) -> Result<bool, WorkflowError> {
         Ok(input > 0)
     }
@@ -68,7 +68,7 @@ impl Workflow<bool, i32> for BoolToInt {
     async fn execute(
         &self,
         input: bool,
-        _ctx: &ExecutionContext<'_>,
+        _ctx: &ExecutionContext,
     ) -> Result<i32, WorkflowError> {
         Ok(if input { 100 } else { -100 })
     }
@@ -83,7 +83,7 @@ impl Workflow<i32, i32> for FailIfNegative {
     async fn execute(
         &self,
         input: i32,
-        _ctx: &ExecutionContext<'_>,
+        _ctx: &ExecutionContext,
     ) -> Result<i32, WorkflowError> {
         if input < 0 {
             Err(WorkflowError::ValidationError("negative".into()))
@@ -102,7 +102,7 @@ impl Workflow<String, i32> for RecoverDefault {
     async fn execute(
         &self,
         _input: String,
-        _ctx: &ExecutionContext<'_>,
+        _ctx: &ExecutionContext,
     ) -> Result<i32, WorkflowError> {
         Ok(0)
     }
@@ -110,13 +110,10 @@ impl Workflow<String, i32> for RecoverDefault {
 
 // ── Shared context ──────────────────────────────────────────
 
-static STATE: LazyLock<State> = LazyLock::new(State::new);
-static PLATFORM: LazyLock<NullPlatform> = LazyLock::new(NullPlatform::new);
-
-fn make_ctx() -> ExecutionContext<'static> {
+fn make_ctx() -> ExecutionContext {
     ExecutionContext {
-        state: &STATE,
-        platform: &*PLATFORM,
+        state: Arc::new(State::new()),
+        platform: Arc::new(NullPlatform::new()),
     }
 }
 

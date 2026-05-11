@@ -24,7 +24,7 @@
 //! use async_trait::async_trait;
 //!
 //! # #[tokio::main]
-//! # async fn example(_ctx: &ExecutionContext<'_>) -> Result<(), WorkflowError> {
+//! # async fn example(_ctx: &ExecutionContext) -> Result<(), WorkflowError> {
 //! // Map: i32 → String
 //! let map = Map::new(|x: i32| x.to_string());
 //! // Predicate: i32 → bool
@@ -64,7 +64,7 @@ impl<T: Send + Sync + 'static> Workflow<T, T> for Identity<T> {
         "identity"
     }
 
-    async fn execute(&self, input: T, _ctx: &ExecutionContext<'_>) -> Result<T, WorkflowError> {
+    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
         Ok(input)
     }
 }
@@ -95,7 +95,7 @@ impl<I: Send + Sync + 'static, O: Send + Sync + 'static, F: Fn(I) -> O + Send + 
         "map"
     }
 
-    async fn execute(&self, input: I, _ctx: &ExecutionContext<'_>) -> Result<O, WorkflowError> {
+    async fn execute(&self, input: I, _ctx: &ExecutionContext) -> Result<O, WorkflowError> {
         Ok((self.f)(input))
     }
 }
@@ -124,7 +124,7 @@ impl<T: Send + Sync + 'static, P: Fn(&T) -> bool + Send + Sync> Workflow<T, bool
         "predicate"
     }
 
-    async fn execute(&self, input: T, _ctx: &ExecutionContext<'_>) -> Result<bool, WorkflowError> {
+    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<bool, WorkflowError> {
         Ok((self.predicate)(&input))
     }
 }
@@ -150,7 +150,7 @@ impl<I: Send + Sync + 'static, O: Clone + Send + Sync + 'static> Workflow<I, O> 
         "constant"
     }
 
-    async fn execute(&self, _input: I, _ctx: &ExecutionContext<'_>) -> Result<O, WorkflowError> {
+    async fn execute(&self, _input: I, _ctx: &ExecutionContext) -> Result<O, WorkflowError> {
         Ok(self.value.clone())
     }
 }
@@ -176,7 +176,7 @@ impl<T: Debug + Send + Sync + 'static> Workflow<T, T> for Log<T> {
         "log"
     }
 
-    async fn execute(&self, input: T, _ctx: &ExecutionContext<'_>) -> Result<T, WorkflowError> {
+    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
         tracing::info!(value = ?input, type = std::any::type_name::<T>(), "workflow value");
         Ok(input)
     }
@@ -203,7 +203,7 @@ impl<T: Send + Sync + 'static> Workflow<T, T> for Delay<T> {
         "delay"
     }
 
-    async fn execute(&self, input: T, _ctx: &ExecutionContext<'_>) -> Result<T, WorkflowError> {
+    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
         tokio::time::sleep(self.duration).await;
         Ok(input)
     }
@@ -214,15 +214,12 @@ mod tests {
     use super::*;
     use crate::workflow::types::State;
     use crate::workflow::platform::NullPlatform;
-    use std::sync::LazyLock;
+    use std::sync::Arc;
 
-    static STATE: LazyLock<State> = LazyLock::new(State::new);
-    static PLATFORM: LazyLock<NullPlatform> = LazyLock::new(NullPlatform::new);
-
-    fn make_ctx() -> ExecutionContext<'static> {
+    fn make_ctx() -> ExecutionContext {
         ExecutionContext {
-            state: &STATE,
-            platform: &*PLATFORM,
+            state: Arc::new(State::new()),
+            platform: Arc::new(NullPlatform::new()),
         }
     }
 
