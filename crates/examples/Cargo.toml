@@ -41,5 +41,5 @@ path = "src/bin/workflow/state_node.rs"
 
 [dependencies]
 anyhow = "1"
-autonomous = { path = "../autonomous" }
+intelligent_subject = { path = "../intelligent_subject" }
 tokio = { version = "1", features = ["full"] }

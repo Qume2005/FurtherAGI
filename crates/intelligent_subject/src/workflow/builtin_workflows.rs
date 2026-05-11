@@ -18,10 +18,10 @@
 //! ## 示例
 //!
 //! ```rust
-//! use autonomous::workflow::builtin_workflows::{Identity, Map, Predicate};
-//! use autonomous::workflow::definition::Workflow;
-//! use autonomous::workflow::model::ExecutionContext;
-//! use autonomous::workflow::error::WorkflowError;
+//! use intelligent_subject::workflow::builtin_workflows::{Identity, Map, Predicate};
+//! use intelligent_subject::workflow::definition::Workflow;
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::error::WorkflowError;
 //! use async_trait::async_trait;
 //!
 //! # #[tokio::main]
@@ -219,9 +219,9 @@ impl<T: Send + Sync + 'static> Workflow<T, T> for Delay<T> {
 /// # 示例
 ///
 /// ```rust
-/// use autonomous::workflow::builtin_workflows::{state_node, Map};
-/// use autonomous::workflow::dag::DagBuilder;
-/// use autonomous::workflow::model::StateStore;
+/// use intelligent_subject::workflow::builtin_workflows::{state_node, Map};
+/// use intelligent_subject::workflow::dag::DagBuilder;
+/// use intelligent_subject::workflow::model::StateStore;
 /// use std::sync::Arc;
 ///
 /// let store = Arc::new(StateStore::new());

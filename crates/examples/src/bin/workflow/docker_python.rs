@@ -12,11 +12,11 @@
 //! cargo run -p examples --bin workflow_docker_python
 //! ```
 
-use autonomous::workflow::dag::DagBuilder;
-use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::executor::Executor;
-use autonomous::workflow::platform::{DockerPlatform, WorkPlatform};
-use autonomous::workflow::model::ExecutionContext;
+use intelligent_subject::workflow::dag::DagBuilder;
+use intelligent_subject::workflow::error::WorkflowError;
+use intelligent_subject::workflow::executor::Executor;
+use intelligent_subject::workflow::platform::{DockerPlatform, WorkPlatform};
+use intelligent_subject::workflow::model::ExecutionContext;
 use std::path::Path;
 use std::sync::Arc;
 

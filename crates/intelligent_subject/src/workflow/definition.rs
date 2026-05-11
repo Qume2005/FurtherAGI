@@ -8,9 +8,9 @@
 //! # 快速开始
 //!
 //! ```rust
-//! use autonomous::workflow::dag::DagBuilder;
-//! use autonomous::workflow::model::ExecutionContext;
-//! use autonomous::workflow::error::WorkflowError;
+//! use intelligent_subject::workflow::dag::DagBuilder;
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::error::WorkflowError;
 //!
 //! let mut builder = DagBuilder::new();
 //!
@@ -52,9 +52,9 @@ use super::model::ExecutionContext;
 /// # 示例
 ///
 /// ```rust
-/// use autonomous::workflow::definition::Workflow;
-/// use autonomous::workflow::error::WorkflowError;
-/// use autonomous::workflow::model::ExecutionContext;
+/// use intelligent_subject::workflow::definition::Workflow;
+/// use intelligent_subject::workflow::error::WorkflowError;
+/// use intelligent_subject::workflow::model::ExecutionContext;
 /// use async_trait::async_trait;
 ///
 /// struct Double;
@@ -123,9 +123,9 @@ struct WorkflowWrapper<W, I, O> {
 /// # 示例
 ///
 /// ```rust
-/// use autonomous::workflow::definition::{Workflow, into_erased, ErasedWorkflow};
-/// use autonomous::workflow::error::WorkflowError;
-/// use autonomous::workflow::model::ExecutionContext;
+/// use intelligent_subject::workflow::definition::{Workflow, into_erased, ErasedWorkflow};
+/// use intelligent_subject::workflow::error::WorkflowError;
+/// use intelligent_subject::workflow::model::ExecutionContext;
 /// use async_trait::async_trait;
 ///
 /// struct Double;
@@ -185,9 +185,9 @@ where
 /// # 示例
 ///
 /// ```rust
-/// use autonomous::workflow::definition::from_fn;
-/// use autonomous::workflow::model::ExecutionContext;
-/// use autonomous::workflow::error::WorkflowError;
+/// use intelligent_subject::workflow::definition::from_fn;
+/// use intelligent_subject::workflow::model::ExecutionContext;
+/// use intelligent_subject::workflow::error::WorkflowError;
 ///
 /// let wf = from_fn("add_one", |input: i32, _ctx: &ExecutionContext| async move {
 ///     Ok::<i32, WorkflowError>(input + 1)

@@ -45,10 +45,10 @@
 //! ## 完整用法
 //!
 //! ```rust
-//! use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
-//! use autonomous::workflow::definition::{Workflow, into_erased};
-//! use autonomous::workflow::model::ExecutionContext;
-//! use autonomous::workflow::error::WorkflowError;
+//! use intelligent_subject::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
+//! use intelligent_subject::workflow::definition::{Workflow, into_erased};
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::error::WorkflowError;
 //! use async_trait::async_trait;
 //!
 //! struct AddOne;

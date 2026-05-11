@@ -1,13 +1,13 @@
 //! Integration tests for config-driven workflow building.
 
 use async_trait::async_trait;
-use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
-use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::executor::Executor;
-use autonomous::workflow::definition::{into_erased, Workflow};
-use autonomous::workflow::model::ExecutionContext;
-use autonomous::workflow::workflow_manager::WorkflowManager;
-use autonomous::workflow::platform::NullPlatform;
+use intelligent_subject::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
+use intelligent_subject::workflow::error::WorkflowError;
+use intelligent_subject::workflow::executor::Executor;
+use intelligent_subject::workflow::definition::{into_erased, Workflow};
+use intelligent_subject::workflow::model::ExecutionContext;
+use intelligent_subject::workflow::workflow_manager::WorkflowManager;
+use intelligent_subject::workflow::platform::NullPlatform;
 use std::sync::Arc;
 
 // ── Test workflows ──────────────────────────────────────────

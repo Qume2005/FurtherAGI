@@ -18,7 +18,7 @@ struct TypeInfo {
 /// # Example
 ///
 /// ```rust
-/// use autonomous::workflow::config::TypeRegistry;
+/// use intelligent_subject::workflow::config::TypeRegistry;
 ///
 /// let mut types = TypeRegistry::new();
 /// types.register::<i32>("i32");

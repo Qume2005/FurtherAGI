@@ -4,12 +4,12 @@
 
 use std::sync::Arc;
 
-use autonomous::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
-use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::executor::Executor;
-use autonomous::workflow::definition::from_fn;
-use autonomous::workflow::model::ExecutionContext;
-use autonomous::workflow::platform::NullPlatform;
+use intelligent_subject::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
+use intelligent_subject::workflow::error::WorkflowError;
+use intelligent_subject::workflow::executor::Executor;
+use intelligent_subject::workflow::definition::from_fn;
+use intelligent_subject::workflow::model::ExecutionContext;
+use intelligent_subject::workflow::platform::NullPlatform;
 
 const PIPELINE_TOML: &str = r#"
 [workflow]
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // WorkflowManager 执行
     println!("\n--- WorkflowManager 执行 ---");
-    use autonomous::workflow::workflow_manager::WorkflowManager;
+    use intelligent_subject::workflow::workflow_manager::WorkflowManager;
 
     let types2 = TypeRegistry::with_primitives();
     let mut workflows2 = WorkflowFactoryRegistry::new();

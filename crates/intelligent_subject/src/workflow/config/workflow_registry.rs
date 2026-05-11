@@ -17,10 +17,10 @@ use crate::workflow::definition::ErasedWorkflow;
 /// # Example
 ///
 /// ```rust
-/// use autonomous::workflow::config::WorkflowFactoryRegistry;
-/// use autonomous::workflow::definition::{Workflow, into_erased};
-/// use autonomous::workflow::model::ExecutionContext;
-/// use autonomous::workflow::error::WorkflowError;
+/// use intelligent_subject::workflow::config::WorkflowFactoryRegistry;
+/// use intelligent_subject::workflow::definition::{Workflow, into_erased};
+/// use intelligent_subject::workflow::model::ExecutionContext;
+/// use intelligent_subject::workflow::error::WorkflowError;
 /// use async_trait::async_trait;
 ///
 /// struct AddOne;

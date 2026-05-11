@@ -18,8 +18,8 @@
 //! ## 示例
 //!
 //! ```rust
-//! use autonomous::workflow::platform::{NullPlatform, WorkPlatform};
-//! use autonomous::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::platform::{NullPlatform, WorkPlatform};
+//! use intelligent_subject::workflow::model::ExecutionContext;
 //! use std::path::Path;
 //! use std::sync::Arc;
 //!

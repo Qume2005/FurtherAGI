@@ -30,8 +30,8 @@ use super::api::{CommandOutput, PlatformError, WorkPlatform};
 /// # Example
 ///
 /// ```rust,no_run
-/// use autonomous::workflow::platform::DockerPlatform;
-/// use autonomous::workflow::platform::WorkPlatform;
+/// use intelligent_subject::workflow::platform::DockerPlatform;
+/// use intelligent_subject::workflow::platform::WorkPlatform;
 ///
 /// # #[tokio::main]
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -79,7 +79,7 @@ impl DockerPlatform {
         let host_path = host_workspace.path().to_string_lossy().into_owned();
 
         let options = CreateContainerOptions {
-            name: format!("autonomous_{}", std::process::id()),
+            name: format!("intelligent_subject_{}", std::process::id()),
             ..Default::default()
         };
 

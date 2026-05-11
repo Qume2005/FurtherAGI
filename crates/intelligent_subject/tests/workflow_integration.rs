@@ -1,11 +1,11 @@
-use autonomous::workflow::dag::DagBuilder;
-use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::executor::Executor;
-use autonomous::workflow::definition::from_fn;
-use autonomous::workflow::model::{ExecutionContext, StateStore};
-use autonomous::workflow::workflow_manager::WorkflowManager;
-use autonomous::workflow::platform::NullPlatform;
-use autonomous::workflow::builtin_workflows::state_node;
+use intelligent_subject::workflow::dag::DagBuilder;
+use intelligent_subject::workflow::error::WorkflowError;
+use intelligent_subject::workflow::executor::Executor;
+use intelligent_subject::workflow::definition::from_fn;
+use intelligent_subject::workflow::model::{ExecutionContext, StateStore};
+use intelligent_subject::workflow::workflow_manager::WorkflowManager;
+use intelligent_subject::workflow::platform::NullPlatform;
+use intelligent_subject::workflow::builtin_workflows::state_node;
 use std::sync::Arc;
 
 fn make_ctx() -> ExecutionContext {

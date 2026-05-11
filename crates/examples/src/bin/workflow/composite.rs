@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
-use autonomous::workflow::dag::DagBuilder;
-use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::model::ExecutionContext;
-use autonomous::workflow::workflow_manager::WorkflowManager;
-use autonomous::workflow::platform::NullPlatform;
+use intelligent_subject::workflow::dag::DagBuilder;
+use intelligent_subject::workflow::error::WorkflowError;
+use intelligent_subject::workflow::model::ExecutionContext;
+use intelligent_subject::workflow::workflow_manager::WorkflowManager;
+use intelligent_subject::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> Result<(), WorkflowError> {

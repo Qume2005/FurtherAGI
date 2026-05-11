@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/autonomous", "crates/examples", "."]
+members = ["crates/intelligent_subject", "crates/examples", "."]
 resolver = "3"
 
 [workspace.package]

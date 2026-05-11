@@ -11,12 +11,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use autonomous::workflow::builtin_workflows::state_node;
-use autonomous::workflow::dag::DagBuilder;
-use autonomous::workflow::error::WorkflowError;
-use autonomous::workflow::executor::Executor;
-use autonomous::workflow::model::{ExecutionContext, StateStore};
-use autonomous::workflow::platform::NullPlatform;
+use intelligent_subject::workflow::builtin_workflows::state_node;
+use intelligent_subject::workflow::dag::DagBuilder;
+use intelligent_subject::workflow::error::WorkflowError;
+use intelligent_subject::workflow::executor::Executor;
+use intelligent_subject::workflow::model::{ExecutionContext, StateStore};
+use intelligent_subject::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

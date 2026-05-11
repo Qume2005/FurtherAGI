@@ -13,12 +13,12 @@
 //! ## 示例
 //!
 //! ```rust
-//! use autonomous::workflow::executor::Executor;
-//! use autonomous::workflow::dag::DagBuilder;
-//! use autonomous::workflow::definition::{Workflow, into_erased};
-//! use autonomous::workflow::model::ExecutionContext;
-//! use autonomous::workflow::platform::NullPlatform;
-//! use autonomous::workflow::error::WorkflowError;
+//! use intelligent_subject::workflow::executor::Executor;
+//! use intelligent_subject::workflow::dag::DagBuilder;
+//! use intelligent_subject::workflow::definition::{Workflow, into_erased};
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::platform::NullPlatform;
+//! use intelligent_subject::workflow::error::WorkflowError;
 //! use async_trait::async_trait;
 //! use std::sync::Arc;
 //!

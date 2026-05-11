@@ -62,8 +62,8 @@ impl DagBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use autonomous::workflow::dag::DagBuilder;
-    /// use autonomous::workflow::error::WorkflowError;
+    /// use intelligent_subject::workflow::dag::DagBuilder;
+    /// use intelligent_subject::workflow::error::WorkflowError;
     ///
     /// let mut builder = DagBuilder::new();
     ///
@@ -92,9 +92,9 @@ impl DagBuilder {
     /// # Examples
     ///
     /// ```rust
-    /// use autonomous::workflow::dag::DagBuilder;
-    /// use autonomous::workflow::model::ExecutionContext;
-    /// use autonomous::workflow::error::WorkflowError;
+    /// use intelligent_subject::workflow::dag::DagBuilder;
+    /// use intelligent_subject::workflow::model::ExecutionContext;
+    /// use intelligent_subject::workflow::error::WorkflowError;
     ///
     /// let mut builder = DagBuilder::new();
     ///

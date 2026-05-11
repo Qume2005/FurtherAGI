@@ -1,5 +1,5 @@
 [package]
-name = "autonomous"
+name = "intelligent_subject"
 version.workspace = true
 edition.workspace = true
 

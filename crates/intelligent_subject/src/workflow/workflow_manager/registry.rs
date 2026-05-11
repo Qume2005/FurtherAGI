@@ -63,10 +63,10 @@ impl WorkflowManager {
     /// # 示例
     ///
     /// ```rust
-    /// use autonomous::workflow::workflow_manager::WorkflowManager;
-    /// use autonomous::workflow::model::ExecutionContext;
-    /// use autonomous::workflow::platform::NullPlatform;
-    /// use autonomous::workflow::error::WorkflowError;
+    /// use intelligent_subject::workflow::workflow_manager::WorkflowManager;
+    /// use intelligent_subject::workflow::model::ExecutionContext;
+    /// use intelligent_subject::workflow::platform::NullPlatform;
+    /// use intelligent_subject::workflow::error::WorkflowError;
     /// use std::sync::Arc;
     ///
     /// # #[tokio::main]
@@ -104,10 +104,10 @@ impl WorkflowManager {
     /// # 示例
     ///
     /// ```rust
-    /// use autonomous::workflow::workflow_manager::WorkflowManager;
-    /// use autonomous::workflow::model::ExecutionContext;
-    /// use autonomous::workflow::platform::NullPlatform;
-    /// use autonomous::workflow::error::WorkflowError;
+    /// use intelligent_subject::workflow::workflow_manager::WorkflowManager;
+    /// use intelligent_subject::workflow::model::ExecutionContext;
+    /// use intelligent_subject::workflow::platform::NullPlatform;
+    /// use intelligent_subject::workflow::error::WorkflowError;
     /// use std::sync::Arc;
     ///
     /// # #[tokio::main]
