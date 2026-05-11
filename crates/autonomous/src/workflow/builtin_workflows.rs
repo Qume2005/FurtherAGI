@@ -45,7 +45,7 @@ use crate::workflow::definition::Workflow;
 use crate::workflow::model::{ExecutionContext, StateStore};
 
 /// Identity workflow: passes input through unchanged.
-pub struct Identity<T>(PhantomData<T>);
+pub struct Identity<T>(PhantomData<fn() -> T>);
 
 impl<T> Identity<T> {
     pub fn new() -> Self {
@@ -73,7 +73,7 @@ impl<T: Send + Sync + 'static> Workflow<T, T> for Identity<T> {
 /// Map workflow: applies an async function to the input.
 pub struct Map<I, O, F> {
     f: F,
-    _marker: PhantomData<(I, O)>,
+    _marker: PhantomData<fn() -> (I, O)>,
 }
 
 impl<I, O, F> Map<I, O, F>
@@ -104,7 +104,7 @@ impl<I: Send + Sync + 'static, O: Send + Sync + 'static, F: Fn(I) -> O + Send + 
 /// Predicate workflow: evaluates a condition on the input, outputs `bool`.
 pub struct Predicate<T, P> {
     predicate: P,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<fn() -> T>,
 }
 
 impl<T, P> Predicate<T, P>
@@ -133,7 +133,7 @@ impl<T: Send + Sync + 'static, P: Fn(&T) -> bool + Send + Sync> Workflow<T, bool
 /// Constant workflow: always produces the same output, ignoring input.
 pub struct Constant<I, O> {
     value: O,
-    _marker: PhantomData<I>,
+    _marker: PhantomData<fn() -> I>,
 }
 
 impl<I, O: Clone> Constant<I, O> {
@@ -157,7 +157,7 @@ impl<I: Send + Sync + 'static, O: Clone + Send + Sync + 'static> Workflow<I, O> 
 }
 
 /// Log workflow: logs the input at info level and passes it through unchanged.
-pub struct Log<T: Debug>(PhantomData<T>);
+pub struct Log<T: Debug>(PhantomData<fn() -> T>);
 
 impl<T: Debug> Log<T> {
     pub fn new() -> Self {
@@ -186,7 +186,7 @@ impl<T: Debug + Send + Sync + 'static> Workflow<T, T> for Log<T> {
 /// Delay workflow: sleeps for a specified duration, then passes input through.
 pub struct Delay<T> {
     duration: Duration,
-    _marker: PhantomData<T>,
+    _marker: PhantomData<fn() -> T>,
 }
 
 impl<T> Delay<T> {

@@ -113,7 +113,7 @@ pub trait ErasedWorkflow: Send + Sync {
 /// 内部包装器，捕获 `I` 和 `O` 类型参数以实现类型擦除。
 struct WorkflowWrapper<W, I, O> {
     workflow: W,
-    _marker: PhantomData<(I, O)>,
+    _marker: PhantomData<fn() -> (I, O)>,
 }
 
 /// 将任何 `Workflow<I, O>` 转换为类型擦除的 `Box<dyn ErasedWorkflow>`。
@@ -157,7 +157,7 @@ where
 struct FnWorkflow<I, O, F> {
     name: String,
     f: F,
-    _marker: PhantomData<(I, O)>,
+    _marker: PhantomData<fn() -> (I, O)>,
 }
 
 #[async_trait]
