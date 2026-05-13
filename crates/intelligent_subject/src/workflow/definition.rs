@@ -5,6 +5,20 @@
 //! - **用户层** [`Workflow<I, O>`] — 强类型，复杂工作流实现此 trait
 //! - **存储层** [`ErasedWorkflow`] — 类型擦除，DAG 和 Manager 内部使用
 //!
+//! ## 实现特色
+//!
+//! - 通过 [`into_erased`] 实现零成本类型擦除 — 在边界处 `TypeId` 校验，downcast 保证安全
+//! - [`from_fn`] 将 `Fn(I, &ExecutionContext) -> Future` 闭包适配为 `Workflow<I, O>`
+//! - `FnWorkflow` 包装器将闭包桥接到 trait 实现
+//! - `WorkflowWrapper<W, I, O>` 是 `into_erased` 的内部桥梁结构
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `async-trait`（异步 trait） |
+//! | 内部模块 | [`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::ExecutionContext`] |
+//!
 //! # 快速开始
 //!
 //! ```rust
@@ -15,14 +29,16 @@
 //! let mut builder = DagBuilder::new();
 //!
 //! // 不带 ctx（常用）：
-//! builder.add("builtin@Double", |input: i32| async move {
+//! let a = builder.add("builtin@Double", |input: i32| async move {
 //!     Ok::<i32, WorkflowError>(input * 2)
 //! });
 //!
 //! // 带 ctx：
-//! builder.add_with_ctx("builtin@Log", |input: i32, _ctx: &ExecutionContext| async move {
+//! let b = builder.add_with_ctx("builtin@Log", |input: i32, _ctx: &ExecutionContext| async move {
 //!     Ok::<i32, WorkflowError>(input)
 //! });
+//!
+//! assert_ne!(a, b); // 两个不同的 NodeId
 //! ```
 //!
 //! # 类型擦除架构

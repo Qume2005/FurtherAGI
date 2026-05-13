@@ -1,16 +1,18 @@
+//! # 执行引擎 — 核心执行循环
+//!
+//! 按 DAG 拓扑层级异步执行工作流。
+//!
+//! ## 功能实现
+//!
+//! [`Executor::execute()`] 按 DAG 的拓扑层级遍历节点，在每个层级通过 `join_all` 并发
+//! 执行所有节点。处理条件分支路由、或类型 `T | E` 拆解路由、和类型 `(A, B)` 合并、
+//! 循环体子图迭代和 scatter-gather。
+
 use anyhow::Context;
 
 use super::*;
 
 /// DAG 执行的结果。
-///
-/// `output` 是类型擦除的最终输出值，`output_type` 是其 `TypeId`，
-/// 用于安全的 downcast。
-///
-/// ```rust,ignore
-/// let result = Executor::execute(&dag, Box::new(3i32), &ctx).await?;
-/// let output: &i32 = result.output.downcast_ref::<i32>().unwrap();
-/// ```
 pub struct ExecutionResult {
     /// The final output, type-erased.
     pub output: BoxedValue,
@@ -28,9 +30,6 @@ impl std::fmt::Debug for ExecutionResult {
 
 impl Executor {
     /// Execute a DAG with type-erased input.
-    ///
-    /// The caller must ensure `input` matches the entry node's expected type.
-    /// Nodes at the same topological level run concurrently via tokio.
     #[instrument(skip(dag, input, ctx), fields(nodes = dag.topo_order().len()))]
     pub async fn execute(
         dag: &WorkflowDag,
@@ -41,14 +40,11 @@ impl Executor {
         let entry = dag.entry_node().context("DAG has no entry node")?;
         let exit = dag.exit_node().context("DAG has no exit node")?;
 
-        // Collect nodes that belong to loop bodies — they are executed inside execute_node
-        // for Loop nodes, not in the main topological walk.
         let body_nodes = Self::collect_body_nodes(dag, topo);
 
         let mut results: HashMap<NodeId, BoxedValue> = HashMap::new();
         results.insert(entry, input);
 
-        // Build in-degree map.
         let mut in_degree: HashMap<NodeId, usize> = HashMap::new();
         for &node_id in topo {
             in_degree.insert(node_id, dag.incoming(node_id).len());
@@ -57,7 +53,6 @@ impl Executor {
 
         let mut processed: HashSet<NodeId> = HashSet::new();
         loop {
-            // Collect ALL nodes with in-degree 0 that haven't been processed yet.
             let mut level: Vec<NodeId> = topo
                 .iter()
                 .copied()
@@ -72,38 +67,38 @@ impl Executor {
                 processed.insert(id);
             }
 
-            // Skip: body nodes (handled by Loop), Error handler nodes (handled by try_error_handler).
-            level.retain(|&node_id| {
-                if body_nodes.contains(&node_id) {
-                    // Body nodes are managed by Loop execute_node — skip entirely.
-                    // Don't decrement downstream since they're not connected in the main DAG.
-                    return false;
-                }
-                if let Some(node) = dag.get_node(node_id) {
-                    if matches!(node.kind, NodeKind::Error { .. }) {
-                        for edge in dag.outgoing(node_id) {
-                            if let Some(deg) = in_degree.get_mut(&edge.to) {
-                                *deg = deg.saturating_sub(1);
-                            }
-                        }
-                        return false;
-                    }
-                }
-                true
-            });
+            // Skip body nodes (handled by Loop).
+            level.retain(|&node_id| !body_nodes.contains(&node_id));
 
-            // Gather inputs for all nodes in this level before executing concurrently.
+            // Gather inputs for all nodes in this level.
             let mut level_inputs: HashMap<NodeId, anyhow::Result<BoxedValue>> = HashMap::new();
             for &node_id in &level {
-                let incoming = dag.incoming(node_id);
-                let input = if incoming.is_empty() {
-                    results.remove(&node_id).with_context(|| format!("node not found: {node_id:?}"))
+                let node = dag.get_node(node_id);
+                let is_product_join = node.map_or(false, |n| matches!(n.kind, NodeKind::ProductJoin { .. }));
+
+                let input = if is_product_join {
+                    // ProductJoin: collect from ALL incoming edges via clone_fns.
+                    let join_fn = dag.product_join_fn(node_id)
+                        .context("product_join node has no join function")?;
+                    let input_clone_fns = dag.product_join_input_clone_fns(node_id)
+                        .context("product_join node has no input clone fns")?;
+                    let incoming = dag.incoming(node_id);
+                    let mut collected: Vec<BoxedValue> = Vec::with_capacity(incoming.len());
+                    for (i, edge) in incoming.iter().enumerate() {
+                        let val = results.get(&edge.from)
+                            .with_context(|| format!("product_join: upstream node {:?} not found", edge.from))?;
+                        let clone_fn = input_clone_fns.get(i)
+                            .with_context(|| format!("product_join: no clone fn for input {}", i))?;
+                        collected.push(clone_fn(val.as_ref()));
+                    }
+                    Ok(join_fn(collected))
                 } else {
-                    let from = incoming[0].from;
-                    if let Some(clone_fn) = dag.clone_fn(from) {
-                        let val = results.get(&from).with_context(|| format!("node not found: {from:?}"))?;
-                        Ok(clone_fn(val.as_ref()))
+                    // Standard single-input gathering.
+                    let incoming = dag.incoming(node_id);
+                    if incoming.is_empty() {
+                        results.remove(&node_id).with_context(|| format!("node not found: {node_id:?}"))
                     } else {
+                        let from = incoming[0].from;
                         results.remove(&from).with_context(|| format!("node not found: {from:?}"))
                     }
                 };
@@ -128,16 +123,46 @@ impl Executor {
                     Ok(val) => {
                         let node = dag.get_node(node_id);
                         let is_conditional = node.map_or(false, |n| matches!(n.kind, NodeKind::Conditional { .. }));
+                        let is_sum_match = node.map_or(false, |n| matches!(n.kind, NodeKind::SumMatch { .. }));
 
-                        if is_conditional {
-                            // Route only the matching branch.
+                        if is_sum_match {
+                            // SumMatch: handler wraps result in SumMatchCarrier for routing.
+                            match val.downcast::<SumMatchCarrier>() {
+                                Ok(carrier_box) => {
+                                    let carrier = *carrier_box;
+                                    results.insert(node_id, carrier.value);
+                                    for edge in dag.outgoing(node_id) {
+                                        let activate = match &edge.label {
+                                            Some(label) if label == "ok" && carrier.is_ok => true,
+                                            Some(label) if label == "err" && !carrier.is_ok => true,
+                                            None => true,
+                                            _ => false,
+                                        };
+                                        if activate {
+                                            if let Some(deg) = in_degree.get_mut(&edge.to) {
+                                                *deg = deg.saturating_sub(1);
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(val) => {
+                                    // Fallback: no carrier, just pass through
+                                    results.insert(node_id, val);
+                                    for edge in dag.outgoing(node_id) {
+                                        if let Some(deg) = in_degree.get_mut(&edge.to) {
+                                            *deg = deg.saturating_sub(1);
+                                        }
+                                    }
+                                }
+                            }
+                        } else if is_conditional {
                             let predicate_result = val.downcast_ref::<bool>().copied();
                             results.insert(node_id, val);
                             for edge in dag.outgoing(node_id) {
                                 let activate = match (&edge.label, predicate_result) {
                                     (Some(label), Some(true)) if label == "true" => true,
                                     (Some(label), Some(false)) if label == "false" => true,
-                                    (None, _) => true, // unlabeled edges always activate
+                                    (None, _) => true,
                                     _ => false,
                                 };
                                 if activate {
@@ -147,7 +172,6 @@ impl Executor {
                                 }
                             }
                         } else {
-                            // Normal node: decrement all downstream.
                             results.insert(node_id, val);
                             for edge in dag.outgoing(node_id) {
                                 if let Some(deg) = in_degree.get_mut(&edge.to) {
@@ -157,25 +181,13 @@ impl Executor {
                         }
                     }
                     Err(e) => {
-                        if let Some(recovered) =
-                            Self::try_error_handler(dag, node_id, &e, ctx).await?
-                        {
-                            for edge in dag.outgoing(node_id) {
-                                if let Some(deg) = in_degree.get_mut(&edge.to) {
-                                    *deg = deg.saturating_sub(1);
-                                }
-                            }
-                            results.insert(node_id, recovered);
-                        } else {
-                            return Err(e);
-                        }
+                        return Err(e);
                     }
                 }
             }
         }
 
         let output = results.remove(&exit).with_context(|| format!("node not found: {exit:?}"))?;
-
         let output_type = dag
             .get_node(exit)
             .and_then(|n| n.output_type)
@@ -183,4 +195,10 @@ impl Executor {
 
         Ok(ExecutionResult { output, output_type })
     }
+}
+
+/// Internal carrier used by SumMatch to communicate branch direction back to the executor.
+pub(super) struct SumMatchCarrier {
+    pub value: BoxedValue,
+    pub is_ok: bool,
 }

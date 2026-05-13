@@ -1,5 +1,5 @@
 use super::*;
-use crate::workflow::dag::DagBuilder;
+use crate::workflow::dag::{DagBuilder, make_clone_fn, ProductJoinFn};
 use crate::workflow::error::WorkflowError;
 use crate::workflow::definition::{into_erased, Workflow};
 use crate::workflow::platform::NullPlatform;
@@ -50,57 +50,87 @@ async fn linear_chain() {
 }
 
 #[tokio::test]
-async fn broadcast_fanout() {
-    // AddOne(0) -> Broadcast -> [MulTwo, AddOne]
+async fn scatter_gather() {
+    // AddOne(0)=1 → ScatterGather[MulTwo, AddOne] → (2, 2)
     let mut builder = DagBuilder::new();
     let src = builder.add_workflow("add1", into_erased(AddOne));
-    let bc = builder.add_broadcast::<i32>();
-    let branch_a = builder.add_workflow("mul2", into_erased(MulTwo));
-    let branch_b = builder.add_workflow("add2", into_erased(AddOne));
-
-    builder.connect(src, bc).unwrap();
-    builder.connect(bc, branch_a).unwrap();
-    builder.connect(bc, branch_b).unwrap();
+    let gather_fn: ProductJoinFn = Box::new(|vals| {
+        let a = *vals[0].downcast_ref::<i32>().unwrap();
+        let b = *vals[1].downcast_ref::<i32>().unwrap();
+        Box::new((a, b))
+    });
+    let sg = builder.add_scatter_gather(
+        std::any::TypeId::of::<i32>(),
+        make_clone_fn::<i32>(),
+        vec![into_erased(MulTwo), into_erased(AddOne)],
+        gather_fn,
+        std::any::TypeId::of::<(i32, i32)>(),
+    );
+    builder.connect(src, sg).unwrap();
     builder.set_entry(src).unwrap();
-    builder.set_exit(branch_a).unwrap();
+    builder.set_exit(sg).unwrap();
 
     let dag = builder.build().unwrap();
     let ctx = make_ctx();
     let result = Executor::execute(&dag, Box::new(0i32), &ctx).await.unwrap();
-    let output: &i32 = result.output.downcast_ref::<i32>().unwrap();
-    // branch_a: AddOne(0)=1, MulTwo(1)=2
-    assert_eq!(*output, 2);
+    let output: &(i32, i32) = result.output.downcast_ref::<(i32, i32)>().unwrap();
+    // AddOne(0)=1, branches: MulTwo(1)=2, AddOne(1)=2 → (2, 2)
+    assert_eq!(*output, (2, 2));
 }
 
 #[tokio::test]
-async fn error_handler_recovery() {
-    struct Fail;
-    #[async_trait]
-    impl Workflow<i32, i32> for Fail {
-        fn name(&self) -> &str { "fail" }
-        async fn execute(&self, _input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
-            Err(WorkflowError::ValidationError("intentional failure".into()))
-        }
-    }
-
-    struct ErrorHandler;
-    #[async_trait]
-    impl Workflow<String, i32> for ErrorHandler {
-        fn name(&self) -> &str { "error_handler" }
-        async fn execute(&self, _input: String, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
-            Ok(-1)
-        }
-    }
-
+async fn sum_match_ok_branch() {
+    // Result<i32, String> → SumMatch → ok(i32) handler
     let mut builder = DagBuilder::new();
-    let fail_node = builder.add_workflow("fail", into_erased(Fail));
-    let _err_handler = builder.add_error_handler(fail_node, into_erased(ErrorHandler)).unwrap();
-    builder.set_entry(fail_node).unwrap();
-    builder.set_exit(fail_node).unwrap();
+    let src = builder.add("result_src", |input: i32| async move {
+        Ok::<Result<i32, String>, WorkflowError>(Ok(input * 2))
+    });
+    let sm = builder.add_sum_match::<i32, String>();
+    let ok_path = builder.add("ok_path", |input: i32| async move {
+        Ok::<String, WorkflowError>(format!("ok: {input}"))
+    });
+    let err_path = builder.add("err_path", |input: String| async move {
+        Ok::<String, WorkflowError>(format!("err: {input}"))
+    });
+
+    builder.connect(src, sm).unwrap();
+    builder.connect_labeled(sm, ok_path, "ok").unwrap();
+    builder.connect_labeled(sm, err_path, "err").unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(ok_path).unwrap();
 
     let dag = builder.build().unwrap();
     let ctx = make_ctx();
-    let result = Executor::execute(&dag, Box::new(42i32), &ctx).await.unwrap();
-    let output: &i32 = result.output.downcast_ref::<i32>().unwrap();
-    assert_eq!(*output, -1);
+    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
+    let output: &String = result.output.downcast_ref::<String>().unwrap();
+    assert_eq!(*output, "ok: 10");
 }
+
+#[tokio::test]
+async fn sum_match_err_branch() {
+    // Result<i32, String> → SumMatch → err(String) handler
+    let mut builder = DagBuilder::new();
+    let src = builder.add("result_src", |_input: i32| async move {
+        Ok::<Result<i32, String>, WorkflowError>(Err("failure".into()))
+    });
+    let sm = builder.add_sum_match::<i32, String>();
+    let ok_path = builder.add("ok_path", |input: i32| async move {
+        Ok::<String, WorkflowError>(format!("ok: {input}"))
+    });
+    let err_path = builder.add("err_path", |input: String| async move {
+        Ok::<String, WorkflowError>(format!("err: {input}"))
+    });
+
+    builder.connect(src, sm).unwrap();
+    builder.connect_labeled(sm, ok_path, "ok").unwrap();
+    builder.connect_labeled(sm, err_path, "err").unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(err_path).unwrap();
+
+    let dag = builder.build().unwrap();
+    let ctx = make_ctx();
+    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
+    let output: &String = result.output.downcast_ref::<String>().unwrap();
+    assert_eq!(*output, "err: failure");
+}
+

@@ -1,12 +1,13 @@
-use intelligent_subject::workflow::dag::DagBuilder;
+use intelligent_subject::workflow::dag::{DagBuilder, make_clone_fn, ProductJoinFn};
 use intelligent_subject::workflow::error::WorkflowError;
 use intelligent_subject::workflow::executor::Executor;
-use intelligent_subject::workflow::definition::from_fn;
+use intelligent_subject::workflow::definition::{from_fn, into_erased, Workflow};
 use intelligent_subject::workflow::model::{ExecutionContext, StateStore};
 use intelligent_subject::workflow::workflow_manager::WorkflowManager;
 use intelligent_subject::workflow::platform::NullPlatform;
 use intelligent_subject::workflow::builtin_workflows::state_node;
 use std::sync::Arc;
+use async_trait::async_trait;
 
 fn make_ctx() -> ExecutionContext {
     ExecutionContext {
@@ -42,26 +43,108 @@ async fn e2e_manager_composite_workflow() {
     assert_eq!(result, 9);
 }
 
-/// Broadcast: one value fans out to multiple independent branches.
+/// Scatter-gather: one value fans out to multiple branches, gathered into tuple.
 #[tokio::test]
-async fn e2e_broadcast_parallel_branches() {
+async fn e2e_scatter_gather() {
+    struct MulTwo;
+    #[async_trait]
+    impl Workflow<i32, i32> for MulTwo {
+        fn name(&self) -> &str { "mul_two" }
+        async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
+            Ok(input * 2)
+        }
+    }
+
     let mut builder = DagBuilder::new();
     let src = builder.add("src", |input: i32| async move { Ok::<i32, WorkflowError>(input + 1) });
-    let bc = builder.add_broadcast::<i32>();
-    let left = builder.add("left", |input: i32| async move { Ok::<i32, WorkflowError>(input * 2) });
-    let right = builder.add("right", |input: i32| async move { Ok::<i32, WorkflowError>(input + 1) });
+    let gather_fn: ProductJoinFn = Box::new(|vals| {
+        let a = *vals[0].downcast_ref::<i32>().unwrap();
+        let b = *vals[1].downcast_ref::<i32>().unwrap();
+        Box::new((a, b))
+    });
+    let sg = builder.add_scatter_gather(
+        std::any::TypeId::of::<i32>(),
+        make_clone_fn::<i32>(),
+        vec![into_erased(MulTwo), into_erased(AddOne)],
+        gather_fn,
+        std::any::TypeId::of::<(i32, i32)>(),
+    );
 
-    builder.connect(src, bc).unwrap();
-    builder.connect(bc, left).unwrap();
-    builder.connect(bc, right).unwrap();
+    builder.connect(src, sg).unwrap();
     builder.set_entry(src).unwrap();
-    builder.set_exit(left).unwrap();
+    builder.set_exit(sg).unwrap();
 
     let dag = builder.build().unwrap();
     let ctx = make_ctx();
     let result = Executor::execute(&dag, Box::new(0i32), &ctx).await.unwrap();
-    // src: AddOne(0)=1, broadcast 1 -> left: MulTwo(1)=2
-    assert_eq!(*result.output.downcast_ref::<i32>().unwrap(), 2);
+    // src: AddOne(0)=1, branches: MulTwo(1)=2, AddOne(1)=2 → (2, 2)
+    let output = result.output.downcast_ref::<(i32, i32)>().unwrap();
+    assert_eq!(*output, (2, 2));
+}
+
+// Helper for e2e_scatter_gather test
+struct AddOne;
+#[async_trait]
+impl Workflow<i32, i32> for AddOne {
+    fn name(&self) -> &str { "add_one" }
+    async fn execute(&self, input: i32, _ctx: &ExecutionContext) -> Result<i32, WorkflowError> {
+        Ok(input + 1)
+    }
+}
+
+/// SumMatch: Result<i32, String> → ok branch or err branch based on value.
+#[tokio::test]
+async fn e2e_sum_match_ok_branch() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("src", |input: i32| async move {
+        Ok::<Result<i32, String>, WorkflowError>(Ok(input * 3))
+    });
+    let sm = builder.add_sum_match::<i32, String>();
+    let ok_path = builder.add("ok_path", |v: i32| async move {
+        Ok::<String, WorkflowError>(format!("got {v}"))
+    });
+    let err_path = builder.add("err_path", |v: String| async move {
+        Ok::<String, WorkflowError>(format!("error: {v}"))
+    });
+
+    builder.connect(src, sm).unwrap();
+    builder.connect_labeled(sm, ok_path, "ok").unwrap();
+    builder.connect_labeled(sm, err_path, "err").unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(ok_path).unwrap();
+
+    let dag = builder.build().unwrap();
+    let ctx = make_ctx();
+    let result = Executor::execute(&dag, Box::new(7i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<String>().unwrap();
+    assert_eq!(*output, "got 21");
+}
+
+#[tokio::test]
+async fn e2e_sum_match_err_branch() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("src", |_input: i32| async move {
+        Ok::<Result<i32, String>, WorkflowError>(Err("bad".into()))
+    });
+    let sm = builder.add_sum_match::<i32, String>();
+    let ok_path = builder.add("ok_path", |v: i32| async move {
+        Ok::<String, WorkflowError>(format!("got {v}"))
+    });
+    let err_path = builder.add("err_path", |v: String| async move {
+        Ok::<String, WorkflowError>(format!("error: {v}"))
+    });
+
+    builder.connect(src, sm).unwrap();
+    builder.connect_labeled(sm, ok_path, "ok").unwrap();
+    builder.connect_labeled(sm, err_path, "err").unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(err_path).unwrap();
+
+    let dag = builder.build().unwrap();
+    let ctx = make_ctx();
+    let result = Executor::execute(&dag, Box::new(7i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<String>().unwrap();
+    assert_eq!(*output, "error: bad");
 }
 
 /// Loop: execute a body subgraph N times, threading output each iteration.
@@ -78,42 +161,6 @@ async fn e2e_loop_iteration() {
     let ctx = make_ctx();
     let result = Executor::execute(&dag, Box::new(0i32), &ctx).await.unwrap();
     assert_eq!(*result.output.downcast_ref::<i32>().unwrap(), 5);
-}
-
-/// Error handler: a node fails, the paired error handler recovers with a default value.
-#[tokio::test]
-async fn e2e_error_handler_with_downstream() {
-    let mut builder = DagBuilder::new();
-
-    let fail = builder.add("fail_if_neg", |input: i32| async move {
-        if input < 0 {
-            Err(WorkflowError::ValidationError("value is negative".into()))
-        } else {
-            Ok::<i32, WorkflowError>(input)
-        }
-    });
-    let _handler = builder.add_error_handler(
-        fail,
-        from_fn("default_recovery", |_input: String, _ctx: &ExecutionContext| async move {
-            Ok::<i32, WorkflowError>(0)
-        }),
-    ).unwrap();
-    let downstream = builder.add("add1", |input: i32| async move { Ok::<i32, WorkflowError>(input + 1) });
-
-    builder.connect(fail, downstream).unwrap();
-    builder.set_entry(fail).unwrap();
-    builder.set_exit(downstream).unwrap();
-
-    let dag = builder.build().unwrap();
-    let ctx = make_ctx();
-
-    // Negative: fail → recovery(0) → AddOne(0)=1
-    let result = Executor::execute(&dag, Box::new(-5i32), &ctx).await.unwrap();
-    assert_eq!(*result.output.downcast_ref::<i32>().unwrap(), 1);
-
-    // Positive: pass → AddOne(5)=6
-    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
-    assert_eq!(*result.output.downcast_ref::<i32>().unwrap(), 6);
 }
 
 /// Conditional: route based on a predicate result.

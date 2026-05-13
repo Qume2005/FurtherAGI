@@ -7,8 +7,22 @@
 //! - **层级并行**：同一拓扑层级的节点通过 `join_all` 并发执行
 //! - **Conditional 路由**：谓词求值后仅激活匹配的标签分支（`"true"` / `"false"`）
 //! - **Loop**：循环体子图固定次数迭代串联执行
-//! - **Broadcast**：通过类型擦除的 clone function 扇出到所有下游
-//! - **Error handler**：节点失败时查找配对的 Error handler 尝试恢复
+//! - **Clone**：通过类型擦除的 clone function 扇出到所有下游
+//!
+//! ## 实现特色
+//!
+//! - 通过 `futures_util::future::join_all` 实现层级并行，同一层节点并发执行
+//! - Conditional 节点评估谓词后仅激活匹配标签的下游边，未激活的分支不执行
+//! - Loop 节点通过子图逐步迭代，每次迭代独立管理结果映射
+//! - Clone 通过缓存的 `CloneFn` 克隆值到多个下游，避免所有权转移
+//! - `#[instrument]` tracing spans 提供可观测性
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `futures-util`（`join_all` 并发）、`tracing`（instrument）、`anyhow`（错误上下文） |
+//! | 内部模块 | [`dag::{NodeKind, WorkflowDag}`]、[`model::{ExecutionContext, NodeId}`] |
 //!
 //! ## 示例
 //!
@@ -60,6 +74,7 @@ use std::collections::{HashMap, HashSet};
 use tracing::instrument;
 
 use super::dag::NodeKind;
+use super::dag::SumMatchResult;
 use super::model::{ExecutionContext, NodeId};
 use super::dag::WorkflowDag;
 

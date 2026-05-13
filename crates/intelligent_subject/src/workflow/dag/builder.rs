@@ -1,4 +1,70 @@
-//! DAG builder: fluent API for constructing workflow DAGs with validation.
+//! # DAG 构建器 — 节点添加
+//!
+//! 在 [`DagBuilder`](super::DagBuilder) 上实现节点添加方法。
+//!
+//! ## 功能实现
+//!
+//! 本模块提供节点添加方法，覆盖所有 [`NodeKind`](super::NodeKind) 变体：
+//!
+//! | 方法 | 节点类型 | 说明 |
+//! |------|----------|------|
+//! | [`add()`](super::DagBuilder::add) | `Workflow` | 从纯异步闭包创建 |
+//! | [`add_with_ctx()`](super::DagBuilder::add_with_ctx) | `Workflow` | 从需要 `ExecutionContext` 的闭包创建 |
+//! | [`add_workflow()`](super::DagBuilder::add_workflow) | `Workflow` | 添加预构建的 `ErasedWorkflow` |
+//! | [`add_erased()`](super::DagBuilder::add_erased) | `Workflow` | 同上，接受字符串 ID |
+//! | [`add_scatter_gather()`](super::DagBuilder::add_scatter_gather) | `Clone` | Scatter-gather 节点 |
+//! | [`add_connection()`](super::DagBuilder::add_connection) | `Connection` | 命名透传节点 |
+//! | [`add_conditional()`](super::DagBuilder::add_conditional) | `Conditional` | 条件分支节点（谓词必须输出 `bool`） |
+//! | [`add_loop()`](super::DagBuilder::add_loop) | `Loop` | 固定次数循环节点 |
+//!
+//! 每个方法分配新的 [`NodeId`](crate::workflow::model::NodeId) 并捕获类型信息。
+//!
+//! ## 实现特色
+//!
+//! - 闭包到工作流自动转换：`add()` / `add_with_ctx()` 通过 [`from_fn`](crate::workflow::definition::from_fn)
+//!   将闭包包装为 `ErasedWorkflow`
+//! - `add_conditional()` 在添加时强制校验谓词输出类型为 `bool`，否则返回 `ValidationError`
+//! - `add_loop()` 从循环体入口/出口节点推断输入/输出类型
+//! - `add_scatter_gather()` 接收 N 个分支 workflow + gather 函数，校验每个分支的输入类型
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `std::future::Future` |
+//! | 内部模块 | [`crate::workflow::definition::from_fn`]、[`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::{ExecutionContext, NodeId, WorkflowId}`] |
+//!
+//! ## 示例
+//!
+//! **Scatter-gather 节点：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::dag::DagBuilder;
+//! use intelligent_subject::workflow::definition::{into_erased, Workflow};
+//! use intelligent_subject::workflow::error::WorkflowError;
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use async_trait::async_trait;
+//!
+//! struct Double;
+//! #[async_trait]
+//! impl Workflow<i32, i32> for Double {
+//!     fn name(&self) -> &str { "double" }
+//!     async fn execute(&self, input: i32, _ctx: &ExecutionContext)
+//!         -> Result<i32, WorkflowError> { Ok(input * 2) }
+//! }
+//!
+//! let mut builder = DagBuilder::new();
+//! let gather_fn = Box::new(|vals: Vec<Box<dyn std::any::Any + Send + Sync>>| {
+//!     let a = *vals[0].downcast_ref::<i32>().unwrap();
+//!     let b = *vals[1].downcast_ref::<i32>().unwrap();
+//!     Box::new((a, b)) as Box<dyn std::any::Any + Send + Sync>
+//! });
+//! let sg = builder.add_scatter_gather_typed::<i32>(
+//!     vec![into_erased(Double), into_erased(Double)],
+//!     gather_fn,
+//!     std::any::TypeId::of::<(i32, i32)>(),
+//! );
+//! ```
 
 use std::any::TypeId;
 use std::future::Future;
@@ -7,7 +73,8 @@ use super::super::definition::from_fn;
 use super::super::error::WorkflowError;
 use super::super::model::{ExecutionContext, NodeId, WorkflowId};
 use super::{
-    CloneFn, DagBuilder, ErasedWorkflow, Node, NodeKind, make_clone_fn,
+    CloneFn, DagBuilder, ErasedWorkflow, Node, NodeKind,
+    ProductJoinFn, SumMatchDestructFn, make_clone_fn,
 };
 
 impl DagBuilder {
@@ -19,7 +86,12 @@ impl DagBuilder {
             next_id: 0,
             entry_node: None,
             exit_node: None,
-            clone_fns: std::collections::HashMap::new(),
+            clone_branches: std::collections::HashMap::new(),
+            clone_gather_fns: std::collections::HashMap::new(),
+            clone_input_clone_fns: std::collections::HashMap::new(),
+            sum_match_fns: std::collections::HashMap::new(),
+            product_join_fns: std::collections::HashMap::new(),
+            product_join_input_clone_fns: std::collections::HashMap::new(),
         }
     }
 
@@ -123,27 +195,69 @@ impl DagBuilder {
         self.add_workflow(WorkflowId::from(id), workflow)
     }
 
-    /// Add a broadcast (fan-out) node.
-    /// `T` is the type that passes through unchanged. Must implement `Clone`.
-    pub fn add_broadcast<T: Clone + Send + Sync + 'static>(&mut self) -> NodeId {
-        self.add_broadcast_erased(TypeId::of::<T>(), make_clone_fn::<T>())
-    }
-
-    /// Add a broadcast node with pre-computed type info (type-erased variant).
-    pub fn add_broadcast_erased(&mut self, type_id: TypeId, clone_fn: CloneFn) -> NodeId {
+    /// Add a scatter-gather (clone) node.
+    ///
+    /// Takes input `T`, fans out to N branch workflows (each receives a cloned T),
+    /// runs all branches in parallel, gathers results into a tuple output `(R1, R2, ..., RN)`.
+    ///
+    /// # Arguments
+    ///
+    /// * `input_type` — The `TypeId` of the input type T.
+    /// * `input_clone_fn` — Function to clone the input T for each branch.
+    /// * `branches` — N branch workflows, each accepting T and producing Ri.
+    /// * `gather_fn` — Combines N branch results into the output tuple.
+    /// * `output_type` — The `TypeId` of the output tuple type.
+    pub fn add_scatter_gather(
+        &mut self,
+        input_type: TypeId,
+        input_clone_fn: CloneFn,
+        branches: Vec<Box<dyn ErasedWorkflow>>,
+        gather_fn: ProductJoinFn,
+        output_type: TypeId,
+    ) -> NodeId {
+        let branch_count = branches.len();
+        // Validate: each branch must accept the input type.
+        for (i, branch) in branches.iter().enumerate() {
+            assert_eq!(
+                branch.input_type_id(),
+                input_type,
+                "scatter-gather branch {i}: input type mismatch"
+            );
+        }
         let node_id = self.alloc_id();
-        self.clone_fns.insert(node_id, clone_fn);
+        self.clone_branches.insert(node_id, branches);
+        self.clone_gather_fns.insert(node_id, gather_fn);
+        self.clone_input_clone_fns.insert(node_id, input_clone_fn);
         self.nodes.insert(
             node_id,
             Node {
                 id: node_id,
-                kind: NodeKind::Broadcast,
+                kind: NodeKind::Clone { branch_count },
                 workflow: None,
-                input_type: Some(type_id),
-                output_type: Some(type_id),
+                input_type: Some(input_type),
+                output_type: Some(output_type),
             },
         );
         node_id
+    }
+
+    /// Add a scatter-gather node with compile-time type information.
+    ///
+    /// Convenience wrapper around [`add_scatter_gather`](Self::add_scatter_gather)
+    /// that automatically captures `TypeId` and `CloneFn` from the generic parameter.
+    pub fn add_scatter_gather_typed<T: Clone + Send + Sync + 'static>(
+        &mut self,
+        branches: Vec<Box<dyn ErasedWorkflow>>,
+        gather_fn: ProductJoinFn,
+        output_type: TypeId,
+    ) -> NodeId {
+        self.add_scatter_gather(
+            TypeId::of::<T>(),
+            make_clone_fn::<T>(),
+            branches,
+            gather_fn,
+            output_type,
+        )
     }
 
     /// Add a named connection (pass-through) node.
@@ -192,31 +306,6 @@ impl DagBuilder {
                 workflow: Some(predicate),
                 input_type,
                 output_type: Some(TypeId::of::<bool>()),
-            },
-        );
-        Ok(node_id)
-    }
-
-    /// Add an error handler node paired with another node.
-    pub fn add_error_handler(
-        &mut self,
-        paired_with: NodeId,
-        handler: Box<dyn ErasedWorkflow>,
-    ) -> Result<NodeId, WorkflowError> {
-        if !self.nodes.contains_key(&paired_with) {
-            return Err(WorkflowError::NodeNotFound(paired_with));
-        }
-        let node_id = self.alloc_id();
-        let input_type = Some(handler.input_type_id());
-        let output_type = Some(handler.output_type_id());
-        self.nodes.insert(
-            node_id,
-            Node {
-                id: node_id,
-                kind: NodeKind::Error { paired_with },
-                workflow: Some(handler),
-                input_type,
-                output_type,
             },
         );
         Ok(node_id)
@@ -272,6 +361,67 @@ impl DagBuilder {
                 kind: NodeKind::SubWorkflow(workflow_id),
                 workflow: None,
                 input_type: Some(input_type),
+                output_type: Some(output_type),
+            },
+        );
+        node_id
+    }
+
+    /// Add a sum-match node that destructures `Result<T, E>`.
+    ///
+    /// Routes to the `"ok"` labeled edge with `T`, or the `"err"` labeled edge with `E`.
+    /// The input type is `Result<T, E>`; the output type is set to `T` (the ok variant).
+    pub fn add_sum_match<T: Send + Sync + 'static, E: Send + Sync + 'static>(&mut self) -> NodeId {
+        let ok_type = TypeId::of::<T>();
+        let err_type = TypeId::of::<E>();
+        let destruct_fn = super::make_sum_match_destruct_fn::<T, E>();
+        self.add_sum_match_erased(ok_type, err_type, destruct_fn)
+    }
+
+    /// Add a sum-match node with type-erased destructuring function.
+    pub fn add_sum_match_erased(
+        &mut self,
+        ok_type: TypeId,
+        err_type: TypeId,
+        destruct_fn: SumMatchDestructFn,
+    ) -> NodeId {
+        let node_id = self.alloc_id();
+        self.sum_match_fns.insert(node_id, destruct_fn);
+        // Input type is Result<T, E>, output_type set to ok_type for type checking convenience.
+        self.nodes.insert(
+            node_id,
+            Node {
+                id: node_id,
+                kind: NodeKind::SumMatch { ok_type, err_type },
+                workflow: None,
+                input_type: None,  // SumMatch input type depends on context; skip validation
+                output_type: None, // Outputs have different types on ok/err branches
+            },
+        );
+        node_id
+    }
+
+    /// Add a product-join node that combines multiple upstream values.
+    ///
+    /// `input_clone_fns` provides a `CloneFn` for each expected input, in edge order.
+    /// `join_fn` combines the collected values into a single output.
+    pub fn add_product_join(
+        &mut self,
+        output_type: TypeId,
+        input_clone_fns: Vec<CloneFn>,
+        join_fn: ProductJoinFn,
+    ) -> NodeId {
+        let input_count = input_clone_fns.len();
+        let node_id = self.alloc_id();
+        self.product_join_fns.insert(node_id, join_fn);
+        self.product_join_input_clone_fns.insert(node_id, input_clone_fns);
+        self.nodes.insert(
+            node_id,
+            Node {
+                id: node_id,
+                kind: NodeKind::ProductJoin { input_count },
+                workflow: None,
+                input_type: None,  // ProductJoin accepts heterogeneous inputs
                 output_type: Some(output_type),
             },
         );

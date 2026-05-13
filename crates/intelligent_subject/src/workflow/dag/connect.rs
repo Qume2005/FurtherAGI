@@ -1,29 +1,112 @@
-//! DAG connection methods and build logic (edge creation, cycle detection, finalization).
+//! # DAG 构建器 — 连接与构建
+//!
+//! 在 [`DagBuilder`](super::DagBuilder) 上实现连接和构建方法。
+//!
+//! ## 功能实现
+//!
+//! 本模块提供 DAG 的边创建、入口/出口设置和最终构建方法：
+//!
+//! - **[`connect()`](super::DagBuilder::connect)** — 连接两个节点，立即校验类型兼容性
+//! - **[`connect_labeled()`](super::DagBuilder::connect_labeled)** — 带标签的连接（用于条件分支 `"true"` / `"false"`）
+//! - **[`set_entry()`](super::DagBuilder::set_entry)** — 指定 DAG 入口节点
+//! - **[`set_exit()`](super::DagBuilder::set_exit)** — 指定 DAG 出口节点
+//! - **[`build()`](super::DagBuilder::build)** — 消费 builder，执行环检测，生成不可变 `WorkflowDag`
+//!
+//! ## 实现特色
+//!
+//! - 即时类型校验：`connect()` 在调用时检查 `TypeId` 兼容性，而非推迟到 `build()`
+//! - `connect_labeled()` 为边添加字符串标签，支持条件分支路由
+//! - `build()` 使用 Kahn 算法计算拓扑排序并检测环
+//! - 拓扑排序缓存在 [`WorkflowDag`](super::WorkflowDag) 中，执行时直接复用
+//! - builder 在 `build()` 中被消费，防止构建后修改
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | 无 |
+//! | 内部模块 | [`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::NodeId`] |
+//!
+//! ## 示例
+//!
+//! **成功构建流水线：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::dag::DagBuilder;
+//! use intelligent_subject::workflow::error::WorkflowError;
+//!
+//! let mut builder = DagBuilder::new();
+//! let a = builder.add("ns@A", |input: i32| async move {
+//!     Ok::<i32, WorkflowError>(input + 1)
+//! });
+//! let b = builder.add("ns@B", |input: i32| async move {
+//!     Ok::<i32, WorkflowError>(input * 2)
+//! });
+//!
+//! builder.connect(a, b).unwrap();
+//! builder.set_entry(a).unwrap();
+//! builder.set_exit(b).unwrap();
+//!
+//! let dag = builder.build().unwrap();
+//! assert_eq!(dag.topo_order().len(), 2);
+//! ```
+//!
+//! **环检测：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::dag::DagBuilder;
+//! use intelligent_subject::workflow::error::{WorkflowError};
+//!
+//! let mut builder = DagBuilder::new();
+//! let a = builder.add("ns@A", |input: i32| async move {
+//!     Ok::<i32, WorkflowError>(input)
+//! });
+//! let b = builder.add("ns@B", |input: i32| async move {
+//!     Ok::<i32, WorkflowError>(input)
+//! });
+//!
+//! builder.connect(a, b).unwrap();
+//! builder.connect(b, a).unwrap(); // 形成环
+//!
+//! let result = builder.build();
+//! assert!(matches!(result, Err(WorkflowError::CycleDetected { .. })));
+//! ```
 
 use std::collections::{HashMap, HashSet};
 
 use super::super::error::WorkflowError;
 use super::super::model::NodeId;
-use super::{DagBuilder, Edge, WorkflowDag};
+use super::{DagBuilder, Edge, NodeKind, WorkflowDag};
+use super::graph::DagParts;
 
 impl DagBuilder {
     /// Connect two nodes. Validates type compatibility immediately.
     pub fn connect(&mut self, from: NodeId, to: NodeId) -> Result<(), WorkflowError> {
-        let from_output = self
-            .nodes
-            .get(&from)
-            .ok_or(WorkflowError::NodeNotFound(from))?
-            .output_type;
+        let to_kind = self.nodes.get(&to).map(|n| n.kind.clone());
 
-        let to_input = self
-            .nodes
-            .get(&to)
-            .ok_or(WorkflowError::NodeNotFound(to))?
-            .input_type;
+        // Skip type validation for SumMatch and ProductJoin (heterogeneous I/O)
+        let skip_type_check = matches!(
+            to_kind,
+            Some(NodeKind::SumMatch { .. }) | Some(NodeKind::ProductJoin { .. })
+        );
 
-        if let (Some(out_ty), Some(in_ty)) = (from_output, to_input) {
-            if out_ty != in_ty {
-                return Err(WorkflowError::type_mismatch(from, to, in_ty, out_ty));
+        if !skip_type_check {
+            let from_output = self
+                .nodes
+                .get(&from)
+                .ok_or(WorkflowError::NodeNotFound(from))?
+                .output_type;
+
+            let to_input = self
+                .nodes
+                .get(&to)
+                .ok_or(WorkflowError::NodeNotFound(to))?
+                .input_type;
+
+            if let (Some(out_ty), Some(in_ty)) = (from_output, to_input) {
+                if out_ty != in_ty {
+                    return Err(WorkflowError::type_mismatch(from, to, in_ty, out_ty));
+                }
             }
         }
 
@@ -118,13 +201,18 @@ impl DagBuilder {
             return Err(WorkflowError::CycleDetected { nodes: cycle_nodes });
         }
 
-        Ok(WorkflowDag::new(
-            self.nodes,
-            self.edges,
-            self.entry_node,
-            self.exit_node,
+        Ok(WorkflowDag::from_parts(DagParts {
+            nodes: self.nodes,
+            edges: self.edges,
+            entry_node: self.entry_node,
+            exit_node: self.exit_node,
             topo_order,
-            self.clone_fns,
-        ))
+            clone_branches: self.clone_branches,
+            clone_gather_fns: self.clone_gather_fns,
+            clone_input_clone_fns: self.clone_input_clone_fns,
+            sum_match_fns: self.sum_match_fns,
+            product_join_fns: self.product_join_fns,
+            product_join_input_clone_fns: self.product_join_input_clone_fns,
+        }))
     }
 }

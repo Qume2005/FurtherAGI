@@ -1,7 +1,57 @@
-//! Type registry mapping string names to `TypeId` and `CloneFn`.
+//! # 类型注册表（TypeRegistry）
 //!
-//! Used by [`ConfigBuilder`](super::ConfigBuilder) to resolve type names
-/// from TOML configuration into the type information needed by `DagBuilder`.
+//! 将字符串类型名映射到 `TypeId` 和 `CloneFn`。
+//!
+//! ## 功能实现
+//!
+//! [`TypeRegistry`] 被 [`ConfigBuilder`](super::ConfigBuilder) 用来将 TOML 配置中的
+//! 类型名字符串（如 `"i32"`、`"String"`）解析为 `DagBuilder` 所需的 `TypeId` 和
+//! 广播节点克隆函数 `CloneFn`。
+//!
+//! ## 实现特色
+//!
+//! - [`with_primitives()`](TypeRegistry::with_primitives) 预注册 14 种常见 Rust 类型：
+//!   `i8` ~ `i128`、`u8` ~ `u128`、`f32`、`f64`、`bool`、`String`
+//! - `register::<T>()` 自动捕获 `TypeId::of::<T>()` 和 `make_clone_fn::<T>()`，
+//!   用户只需指定类型参数和名字
+//! - `get()` 返回 `(TypeId, CloneFn)` 元组，供 `DagBuilder` 直接使用
+//! - 内部使用 `TypeInfo` 结构体封装存储细节，公共 API 简洁
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | 无 |
+//! | 内部模块 | [`crate::workflow::dag::{CloneFn, make_clone_fn}`] |
+//!
+//! ## 示例
+//!
+//! **注册和查找类型：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::config::TypeRegistry;
+//!
+//! let mut types = TypeRegistry::new();
+//! types.register::<i32>("i32");
+//! types.register::<String>("String");
+//!
+//! let (id, clone_fn) = types.get("i32").unwrap();
+//! assert_eq!(id, std::any::TypeId::of::<i32>());
+//! ```
+//!
+//! **预注册基础类型 + 自定义类型：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::config::TypeRegistry;
+//!
+//! let mut types = TypeRegistry::with_primitives();
+//! // 自定义类型
+//! types.register::<Vec<String>>("VecString");
+//!
+//! assert!(types.get("i32").is_some());
+//! assert!(types.get("VecString").is_some());
+//! assert!(types.get("MyCustomType").is_none());
+//! ```
 
 use std::any::TypeId;
 use std::collections::HashMap;

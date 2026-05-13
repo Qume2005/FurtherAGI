@@ -1,6 +1,86 @@
-//! LocalPlatform — 本机执行。
+//! # LocalPlatform — 本机执行
 //!
 //! 直接在本机执行命令，操作本机文件系统。无沙箱隔离。
+//!
+//! ## 功能实现
+//!
+//! `LocalPlatform` 是 [`WorkPlatform`](super::WorkPlatform) 的本机实现，
+//! 通过 `tokio::process::Command` 执行系统命令，直接操作本机文件系统。
+//! 命令以宿主进程的相同权限运行，适用于开发环境和可信执行场景。
+//!
+//! ## 实现特色
+//!
+//! - 通过 `tokio::process::Command` 实现异步命令执行，支持 stdout/stderr 管道捕获
+//! - `run_command` 支持通过 `env` 参数传递环境变量
+//! - 非零退出码触发 [`PlatformError::CommandFailed`](super::PlatformError::CommandFailed)，
+//!   包含退出码和 stderr 内容
+//! - 工作区根目录在构造时自动创建（`create_dir_all`）
+//! - `cleanup` 为空操作 — 本地平台不会删除其工作区
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `async-trait`（异步 trait）、`tokio`（process::Command） |
+//! | 内部模块 | [`super::api::{CommandOutput, PlatformError, WorkPlatform}`] |
+//!
+//! ## 示例
+//!
+//! **运行命令并检查输出：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::platform::{LocalPlatform, WorkPlatform};
+//!
+//! # #[tokio::main]
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let dir = tempfile::tempdir()?;
+//! let platform = LocalPlatform::new(dir.path());
+//!
+//! let output = platform.run_command("echo", &["hello"], &[]).await?;
+//! assert_eq!(output.exit_code, 0);
+//! assert!(output.stdout_string()?.contains("hello"));
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! **写入文件并运行命令读取：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::platform::{LocalPlatform, WorkPlatform};
+//! use std::path::Path;
+//!
+//! # #[tokio::main]
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let dir = tempfile::tempdir()?;
+//! let platform = LocalPlatform::new(dir.path());
+//!
+//! platform.write_file(Path::new("test.txt"), b"hello local").await?;
+//! let data = platform.read_file(Path::new("test.txt")).await?;
+//! assert_eq!(data, b"hello local");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! **处理命令失败：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::platform::{LocalPlatform, PlatformError, WorkPlatform};
+//!
+//! # #[tokio::main]
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let dir = tempfile::tempdir()?;
+//! let platform = LocalPlatform::new(dir.path());
+//!
+//! let result = platform.run_command("false", &[], &[]).await;
+//! match result {
+//!     Err(PlatformError::CommandFailed { code, stderr }) => {
+//!         assert_ne!(code, 0);
+//!     }
+//!     _ => panic!("expected CommandFailed"),
+//! }
+//! # Ok(())
+//! # }
+//! ```
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

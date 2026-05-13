@@ -1,7 +1,29 @@
-//! DockerPlatform — Docker 容器内执行。
+//! # DockerPlatform — Docker 容器内执行
 //!
 //! 在 Docker 容器中执行命令，通过 bind mount 共享工作目录。
 //! 适用于需要沙箱隔离执行 Python 脚本等场景。
+//!
+//! ## 功能实现
+//!
+//! `DockerPlatform` 通过 `bollard` crate 连接 Docker 守护进程，在容器中执行命令。
+//! 容器的 `/workspace` 目录 bind mount 到宿主机临时目录，实现文件双向共享：
+//! 通过 `write_file` 写入的文件在容器内立即可见，反之亦然。
+//!
+//! ## 实现特色
+//!
+//! - 使用 `bollard` Docker API 管理容器生命周期（创建、启动、停止、删除）
+//! - 宿主机临时目录 bind mount 到容器 `/workspace`，文件自动同步
+//! - 容器运行 `sleep infinity` 保持活跃，通过 `docker exec` 执行具体命令
+//! - `run_command` 使用 `docker exec` 并捕获 stdout/stderr 流式输出
+//! - 非零退出码触发 [`PlatformError::CommandFailed`](super::PlatformError::CommandFailed)
+//! - `cleanup` 停止并删除容器（临时目录在析构时自动清理）
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `async-trait`（异步 trait）、`bollard`（Docker API）、`tempfile`（临时目录）、`futures-util`（流式输出） |
+//! | 内部模块 | [`super::api::{CommandOutput, PlatformError, WorkPlatform}`] |
 
 use std::path::Path;
 
@@ -49,7 +71,8 @@ use super::api::{CommandOutput, PlatformError, WorkPlatform};
 ///     &["/workspace/hello.py"],
 ///     &[],
 /// ).await?;
-/// println!("{}", output.stdout_string()?);
+/// assert_eq!(output.exit_code, 0);
+/// assert!(output.stdout_string()?.contains("Hello from Docker!"));
 ///
 /// // Clean up
 /// platform.cleanup().await?;

@@ -24,8 +24,7 @@
 //! use std::sync::Arc;
 //!
 //! let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
-//! // platform.workspace_root() → 临时目录
-//! // platform.run_command() → 空操作
+//! assert!(ctx.platform.workspace_root().exists());
 //! ```
 
 mod api;

@@ -1,7 +1,78 @@
-//! NullPlatform — 默认空实现。
+//! # NullPlatform — 默认空实现
 //!
 //! 适用于不需要外部执行的纯内存工作流。
 //! `run_command` 返回空结果，文件操作在临时目录中进行。
+//!
+//! ## 功能实现
+//!
+//! `NullPlatform` 是 [`WorkPlatform`](super::WorkPlatform) 的默认空实现。
+//! - `run_command` 始终返回空 stdout/stderr 和退出码 0（不执行任何实际命令）
+//! - `write_file` 和 `read_file` 在 `tempfile::TempDir` 中操作，生命周期结束时自动清理
+//! - `cleanup` 为空操作（TempDir 在析构时自动删除）
+//!
+//! 适用于所有工作在内存中完成的纯计算工作流（如 `Identity`、`Map`、`Predicate` 等）。
+//!
+//! ## 实现特色
+//!
+//! - `write_file` 自动创建父目录（`create_dir_all`），无需预先确保目录存在
+//! - `workspace_root()` 返回临时目录路径，可用于测试中的文件路径拼接
+//! - 零开销：命令执行不产生任何系统调用
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `async-trait`（异步 trait）、`tempfile`（临时目录） |
+//! | 内部模块 | [`super::api::{CommandOutput, PlatformError, WorkPlatform}`] |
+//!
+//! ## 示例
+//!
+//! **文件读写：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::platform::NullPlatform;
+//! use intelligent_subject::workflow::platform::WorkPlatform;
+//! use std::path::Path;
+//!
+//! # #[tokio::main]
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let platform = NullPlatform::new();
+//!
+//! platform.write_file(Path::new("data.txt"), b"hello").await?;
+//! let data = platform.read_file(Path::new("data.txt")).await?;
+//! assert_eq!(data, b"hello");
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! **run_command 返回空输出：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::platform::NullPlatform;
+//! use intelligent_subject::workflow::platform::WorkPlatform;
+//!
+//! # #[tokio::main]
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let platform = NullPlatform::new();
+//! let output = platform.run_command("any_command", &["any", "args"], &[]).await?;
+//! assert_eq!(output.exit_code, 0);
+//! assert!(output.stdout.is_empty());
+//! assert!(output.stderr.is_empty());
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! **在 ExecutionContext 中使用：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::platform::NullPlatform;
+//! use std::sync::Arc;
+//!
+//! let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
+//! // ctx.platform.run_command() → 空操作
+//! // ctx.platform.workspace_root() → 临时目录
+//! ```
 
 use std::path::Path;
 

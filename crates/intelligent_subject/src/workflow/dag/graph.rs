@@ -1,11 +1,16 @@
-//! Immutable workflow DAG and accessor methods.
+//! # 不可变工作流 DAG
+//!
+//! [`WorkflowDag`] 是 [`DagBuilder`](super::DagBuilder) 构建完成的不可变结果。
+//! 存储 DAG 节点、边、入口/出口节点、缓存拓扑排序、
+//! Clone scatter-gather 分支、和类型拆解函数和积类型合并函数，仅提供只读访问器方法。
 
 use std::any::Any;
 use std::collections::HashMap;
 
-use super::{Edge, Node, NodeId};
+use crate::workflow::definition::ErasedWorkflow;
+use super::{Edge, Node, NodeId, ProductJoinFn, SumMatchDestructFn};
 
-/// Type alias for the broadcast clone function.
+/// Type alias for the clone fan-out function.
 pub type CloneFn = fn(&(dyn Any + Send + Sync)) -> Box<dyn Any + Send + Sync>;
 
 /// Helper to create a clone function for a specific type.
@@ -23,9 +28,18 @@ pub struct WorkflowDag {
     exit_node: Option<NodeId>,
     /// Cached topological order, computed at build time.
     topo_order: Vec<NodeId>,
-    /// Clone functions for broadcast nodes.
-    /// Maps a broadcast NodeId to a function that can clone its boxed output.
-    clone_fns: HashMap<NodeId, CloneFn>,
+    /// Branch workflows for Clone (scatter-gather) nodes.
+    clone_branches: HashMap<NodeId, Vec<Box<dyn ErasedWorkflow>>>,
+    /// Gather functions for Clone (scatter-gather) nodes.
+    clone_gather_fns: HashMap<NodeId, ProductJoinFn>,
+    /// Clone functions for Clone (scatter-gather) input values.
+    clone_input_clone_fns: HashMap<NodeId, CloneFn>,
+    /// Destruct functions for SumMatch nodes.
+    sum_match_fns: HashMap<NodeId, SumMatchDestructFn>,
+    /// Join functions for ProductJoin nodes.
+    product_join_fns: HashMap<NodeId, ProductJoinFn>,
+    /// Clone functions for ProductJoin input values (per node, ordered by edge).
+    product_join_input_clone_fns: HashMap<NodeId, Vec<CloneFn>>,
 }
 
 impl std::fmt::Debug for WorkflowDag {
@@ -40,23 +54,36 @@ impl std::fmt::Debug for WorkflowDag {
     }
 }
 
+/// Builder arguments for constructing a WorkflowDag.
+pub(super) struct DagParts {
+    pub nodes: HashMap<NodeId, Node>,
+    pub edges: Vec<Edge>,
+    pub entry_node: Option<NodeId>,
+    pub exit_node: Option<NodeId>,
+    pub topo_order: Vec<NodeId>,
+    pub clone_branches: HashMap<NodeId, Vec<Box<dyn ErasedWorkflow>>>,
+    pub clone_gather_fns: HashMap<NodeId, ProductJoinFn>,
+    pub clone_input_clone_fns: HashMap<NodeId, CloneFn>,
+    pub sum_match_fns: HashMap<NodeId, SumMatchDestructFn>,
+    pub product_join_fns: HashMap<NodeId, ProductJoinFn>,
+    pub product_join_input_clone_fns: HashMap<NodeId, Vec<CloneFn>>,
+}
+
 impl WorkflowDag {
     /// Constructor used by the builder in sibling modules.
-    pub(super) fn new(
-        nodes: HashMap<NodeId, Node>,
-        edges: Vec<Edge>,
-        entry_node: Option<NodeId>,
-        exit_node: Option<NodeId>,
-        topo_order: Vec<NodeId>,
-        clone_fns: HashMap<NodeId, CloneFn>,
-    ) -> Self {
+    pub(super) fn from_parts(parts: DagParts) -> Self {
         Self {
-            nodes,
-            edges,
-            entry_node,
-            exit_node,
-            topo_order,
-            clone_fns,
+            nodes: parts.nodes,
+            edges: parts.edges,
+            entry_node: parts.entry_node,
+            exit_node: parts.exit_node,
+            topo_order: parts.topo_order,
+            clone_branches: parts.clone_branches,
+            clone_gather_fns: parts.clone_gather_fns,
+            clone_input_clone_fns: parts.clone_input_clone_fns,
+            sum_match_fns: parts.sum_match_fns,
+            product_join_fns: parts.product_join_fns,
+            product_join_input_clone_fns: parts.product_join_input_clone_fns,
         }
     }
 
@@ -100,8 +127,33 @@ impl WorkflowDag {
         self.nodes.get(&id)
     }
 
-    /// Get the clone function for a broadcast node, if any.
-    pub fn clone_fn(&self, id: NodeId) -> Option<CloneFn> {
-        self.clone_fns.get(&id).copied()
+    /// Get the branch workflows for a Clone (scatter-gather) node, if any.
+    pub fn clone_branches(&self, id: NodeId) -> Option<&Vec<Box<dyn ErasedWorkflow>>> {
+        self.clone_branches.get(&id)
+    }
+
+    /// Get the gather function for a Clone (scatter-gather) node, if any.
+    pub fn clone_gather_fn(&self, id: NodeId) -> Option<&ProductJoinFn> {
+        self.clone_gather_fns.get(&id)
+    }
+
+    /// Get the input clone function for a Clone (scatter-gather) node, if any.
+    pub fn clone_input_clone_fn(&self, id: NodeId) -> Option<CloneFn> {
+        self.clone_input_clone_fns.get(&id).copied()
+    }
+
+    /// Get the destruct function for a SumMatch node, if any.
+    pub fn sum_match_fn(&self, id: NodeId) -> Option<&SumMatchDestructFn> {
+        self.sum_match_fns.get(&id)
+    }
+
+    /// Get the join function for a ProductJoin node, if any.
+    pub fn product_join_fn(&self, id: NodeId) -> Option<&ProductJoinFn> {
+        self.product_join_fns.get(&id)
+    }
+
+    /// Get the input clone functions for a ProductJoin node, if any.
+    pub fn product_join_input_clone_fns(&self, id: NodeId) -> Option<&Vec<CloneFn>> {
+        self.product_join_input_clone_fns.get(&id)
     }
 }

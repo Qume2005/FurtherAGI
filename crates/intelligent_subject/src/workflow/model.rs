@@ -6,6 +6,90 @@
 //! - [`WorkflowId`] — 已注册工作流的唯一名称
 //! - [`StateStore`] — 带过期时间的 kv 存储，用于工作流间共享状态
 //! - [`ExecutionContext`] — 运行时上下文，提供工作平台访问
+//!
+//! ## 功能实现
+//!
+//! 本模块为工作流系统提供四个基础构建块：
+//!
+//! - **[`NodeId`]** — 由 [`DagBuilder`](super::dag::DagBuilder) 在添加节点时自动递增分配的 `u64` 标识，
+//!   在同一个 DAG 内唯一，不可跨 DAG 使用。
+//! - **[`WorkflowId`]** — 支持命名空间格式 `"namespace@name"` 的字符串标识，
+//!   用于在 [`WorkflowManager`](super::workflow_manager::WorkflowManager) 中注册和查找工作流。
+//! - **[`StateStore`]** — 基于 `DashMap` 的线程安全 kv 存储，
+//!   支持带 TTL 的自动过期，可在多个并发工作流之间共享状态。
+//! - **[`ExecutionContext`]** — 运行时上下文，携带 `Arc<dyn WorkPlatform>`，
+//!   为需要外部执行环境的工作流提供平台访问。
+//!
+//! ## 实现特色
+//!
+//! - [`StateStore`] 使用 `DashMap` 实现无锁并发读写，所有方法只需 `&self`
+//! - TTL 过期采用惰性淘汰策略：`get` 时检查过期并自动清除
+//! - [`WorkflowId`] 内置命名空间解析（`namespace()` / `name()`），无需额外字符串处理
+//! - [`ExecutionContext`] 使用 `Arc` 包装平台，可廉价克隆并 move 进异步闭包
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `dashmap`（并发 HashMap） |
+//! | 内部模块 | `crate::workflow::platform::WorkPlatform` |
+//!
+//! ## 示例
+//!
+//! **WorkflowId 命名空间解析：**
+//!
+//! ```
+//! use intelligent_subject::workflow::model::WorkflowId;
+//!
+//! let id = WorkflowId::from("builtin@AddOne");
+//! assert_eq!(id.namespace(), "builtin");
+//! assert_eq!(id.name(), "AddOne");
+//!
+//! let simple: WorkflowId = "my_workflow".into();
+//! assert_eq!(simple.namespace(), "");
+//! assert_eq!(simple.name(), "my_workflow");
+//! ```
+//!
+//! **StateStore 带类型和 TTL 的存取：**
+//!
+//! ```
+//! use intelligent_subject::workflow::model::StateStore;
+//! use std::time::Duration;
+//!
+//! let store = StateStore::new();
+//! store.set("counter", 42i32, None);
+//! store.set("cache", "hello".to_string(), Some(Duration::from_secs(60)));
+//!
+//! assert_eq!(store.get::<i32>("counter"), Some(42));
+//! assert_eq!(store.get::<String>("cache"), Some("hello".to_string()));
+//! ```
+//!
+//! **跨工作流共享 StateStore：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::model::StateStore;
+//! use std::sync::Arc;
+//!
+//! let store = Arc::new(StateStore::new());
+//!
+//! // 在不同的工作流闭包中 clone Arc<StateStore> 即可共享状态
+//! let s1 = store.clone();
+//! s1.set("key", "value1".to_string(), None);
+//!
+//! let s2 = store.clone();
+//! assert_eq!(s2.get::<String>("key"), Some("value1".to_string()));
+//! ```
+//!
+//! **创建 ExecutionContext：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::platform::NullPlatform;
+//! use std::sync::Arc;
+//!
+//! let ctx = ExecutionContext { platform: Arc::new(NullPlatform::new()) };
+//! assert!(ctx.platform.workspace_root().exists());
+//! ```
 
 use std::any::Any;
 use std::sync::Arc;

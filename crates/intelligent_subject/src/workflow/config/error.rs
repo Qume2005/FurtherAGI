@@ -1,38 +1,116 @@
-//! Configuration build errors.
+//! # 配置构建错误
+//!
+//! 定义从 XML 配置构建工作流 DAG 时可能出现的错误。
+//!
+//! ## 功能实现
+//!
+//! [`ConfigBuildError`] 枚举包含 7 种变体，覆盖配置构建全流程：
+//!
+//! - **`ParseError`** — XML 反序列化错误（由 serde + quick-xml 自动产生）
+//! - **`IoError`** — 文件读取 I/O 错误（仅 `build_from_file` 路径）
+//! - **`UnknownType`** — 节点引用了未注册的类型名
+//! - **`UnknownWorkflow`** — 节点引用了未注册的工作流工厂名
+//! - **`UnknownNode`** — 边或循环体引用了不存在的节点名
+//! - **`UnknownSumMatch`** — 节点引用了未注册的 sum-match 工厂
+//! - **`UnknownProductJoin`** — 节点引用了未注册的 product-join 工厂
+//! - **`DagError`** — 底层 DAG 构建错误（类型不匹配、环等）
+//!
+//! ## 实现特色
+//!
+//! - 通过 `thiserror` 自动实现 `Error` trait 和 `Display`
+//! - `#[from]` 自动从 `quick_xml::de::DeError` 和 `std::io::Error` 转换
+//! - `UnknownType` 和 `UnknownWorkflow` 同时包含节点名和引用名，便于精确定位问题
+//! - `DagError` 封装底层 [`WorkflowError`](crate::workflow::error::WorkflowError)，
+//!   保留完整的错误链
+//!
+//! ## 依赖
+//!
+//! | 类别 | 依赖 |
+//! |------|------|
+//! | 外部 crate | `thiserror`（错误派生宏）、`quick-xml`（XML 反序列化） |
+//! | 内部模块 | [`crate::workflow::error::WorkflowError`] |
+//!
+//! ## 示例
+//!
+//! **匹配配置构建错误：**
+//!
+//! ```rust
+//! use intelligent_subject::workflow::config::ConfigBuildError;
+//!
+//! let xml = r#"<workflow name="test" entry="a" exit="a">
+//!   <node name="a" implementation="nonexistent"/>
+//! </workflow>"#;
+//!
+//! let types = intelligent_subject::workflow::config::TypeRegistry::new();
+//! let workflows = intelligent_subject::workflow::config::WorkflowFactoryRegistry::new();
+//! let builder = intelligent_subject::workflow::config::ConfigBuilder::new(types, workflows);
+//!
+//! let result = builder.build_from_str(xml);
+//! match result {
+//!     Err(ConfigBuildError::UnknownWorkflow { node, name }) => {
+//!         assert_eq!(node, "a");
+//!         assert_eq!(name, "nonexistent");
+//!     }
+//!     Err(ConfigBuildError::DagError(_)) => { /* DAG 层面错误 */ }
+//!     _ => {}
+//! }
+//! ```
 
 use crate::workflow::error::WorkflowError;
 use thiserror::Error;
 
-/// Errors that can occur while building a workflow DAG from configuration.
+/// 从 XML 配置构建工作流 DAG 时可能出现的错误。
 #[derive(Error, Debug)]
 pub enum ConfigBuildError {
-    /// TOML syntax or schema error.
-    #[error("TOML parse error: {0}")]
-    ParseError(#[from] toml::de::Error),
+    /// XML 反序列化错误。
+    #[error("XML parse error: {0}")]
+    ParseError(#[from] quick_xml::de::DeError),
 
-    /// File I/O error.
+    /// 文件 I/O 错误。
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// A type name referenced in config was never registered in the [`TypeRegistry`](super::TypeRegistry).
+    /// 节点引用了未注册的类型名。
     #[error("unknown type '{name}' referenced in node '{node}'")]
     UnknownType {
         node: String,
         name: String,
     },
 
-    /// A workflow implementation name was never registered in the [`WorkflowFactoryRegistry`](super::WorkflowFactoryRegistry).
+    /// 节点引用了未注册的工作流工厂名。
     #[error("unknown workflow '{name}' referenced in node '{node}'")]
     UnknownWorkflow {
         node: String,
         name: String,
     },
 
-    /// A node name referenced in edges, loop body, or error handler was not found.
+    /// 引用了不存在的节点名。
     #[error("unknown node '{0}'")]
     UnknownNode(String),
 
-    /// An error from the underlying DAG builder (type mismatch, cycle, etc.).
+    /// 节点引用了未注册的 sum-match 类型名组合。
+    #[error("unknown sum-match ok-type='{ok_type}' err-type='{err_type}' in node '{node}'")]
+    UnknownSumMatch {
+        node: String,
+        ok_type: String,
+        err_type: String,
+    },
+
+    /// 节点引用了未注册的 product-join 工厂名。
+    #[error("unknown product-join '{name}' in node '{node}'")]
+    UnknownProductJoin {
+        node: String,
+        name: String,
+    },
+
+    /// 节点引用了未注册的 clone scatter-gather 工厂名。
+    #[error("unknown clone gather '{name}' in node '{node}'")]
+    UnknownCloneGather {
+        node: String,
+        name: String,
+    },
+
+    /// 底层 DAG 构建错误（类型不匹配、环等）。
     #[error("DAG error: {0}")]
     DagError(#[from] WorkflowError),
 }

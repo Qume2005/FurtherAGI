@@ -1,6 +1,19 @@
-use anyhow::{bail, Context};
+//! # 执行引擎 — 节点分派与辅助方法
+//!
+//! 实现 [`Executor`](super::Executor) 的单节点执行分派和辅助方法。
+//!
+//! ## 功能实现
+//!
+//! - **[`execute_node()`**](super::Executor::execute_node) — 根据 [`NodeKind`](crate::workflow::dag::NodeKind)
+//!   分派到对应处理逻辑
+//! - **[`execute_body()`**](super::Executor::execute_body) — 为 Loop 节点执行 body_entry 到 body_exit 的子图
+//! - **[`collect_body_nodes()`**](super::Executor::collect_body_nodes) — 识别属于循环体的节点，在主遍历中跳过
+
+use anyhow::Context;
 
 use super::*;
+
+use super::engine::SumMatchCarrier;
 
 impl Executor {
     /// Collect all NodeIds that are part of a Loop node's body subgraph.
@@ -31,9 +44,34 @@ impl Executor {
         let node = dag.get_node(node_id).with_context(|| format!("node not found: {node_id:?}"))?;
 
         match &node.kind {
-            NodeKind::Broadcast => {
-                tracing::debug!(node = ?node_id, "broadcast pass-through");
-                Ok(input)
+            NodeKind::Clone { branch_count } => {
+                tracing::debug!(node = ?node_id, branches = branch_count, "scatter-gather execution");
+                let branches = dag.clone_branches(node_id)
+                    .context("clone node has no branches")?;
+                let input_clone_fn = dag.clone_input_clone_fn(node_id)
+                    .context("clone node has no input clone fn")?;
+                let gather_fn = dag.clone_gather_fn(node_id)
+                    .context("clone node has no gather fn")?;
+
+                // Clone input for each branch.
+                let inputs: Vec<BoxedValue> = (0..*branch_count)
+                    .map(|_| input_clone_fn(input.as_ref()))
+                    .collect();
+
+                // Execute all branches concurrently.
+                let futures: Vec<_> = branches.iter().zip(inputs.into_iter())
+                    .map(|(branch, inp)| branch.execute_erased(inp, ctx))
+                    .collect();
+                let branch_results = futures_util::future::join_all(futures).await;
+
+                // Collect results, propagating errors.
+                let mut gathered: Vec<BoxedValue> = Vec::with_capacity(*branch_count);
+                for result in branch_results {
+                    gathered.push(result?);
+                }
+
+                // Apply the gather function to produce the output tuple.
+                Ok(gather_fn(gathered))
             }
             NodeKind::Connection { label } => {
                 tracing::debug!(node = ?node_id, label = %label, "connection pass-through");
@@ -63,7 +101,7 @@ impl Executor {
                         .context(format!("conditional predicate failed at node {node_id:?}"))?;
                     Ok(result)
                 } else {
-                    bail!("conditional node {node_id:?} has no predicate")
+                    anyhow::bail!("conditional node {node_id:?} has no predicate")
                 }
             }
             NodeKind::Workflow(_) | NodeKind::SubWorkflow(_) => {
@@ -74,11 +112,20 @@ impl Executor {
                         .context(format!("workflow execution failed at node {node_id:?}"))?;
                     Ok(result)
                 } else {
-                    bail!("node {node_id:?} has no workflow implementation")
+                    anyhow::bail!("node {node_id:?} has no workflow implementation")
                 }
             }
-            NodeKind::Error { .. } => {
-                // Error handlers are invoked by try_error_handler, pass through.
+            NodeKind::SumMatch { .. } => {
+                let destruct_fn = dag.sum_match_fn(node_id)
+                    .context("sum_match node has no destruct function")?;
+                let result = destruct_fn(input)?;
+                match result {
+                    SumMatchResult::Ok(val) => Ok(Box::new(SumMatchCarrier { value: val, is_ok: true })),
+                    SumMatchResult::Err(val) => Ok(Box::new(SumMatchCarrier { value: val, is_ok: false })),
+                }
+            }
+            NodeKind::ProductJoin { .. } => {
+                // Input has already been combined by the join_fn in the main loop.
                 Ok(input)
             }
         }
@@ -103,7 +150,6 @@ impl Executor {
                 // Get input: either seeded (for body_entry) or from predecessor.
                 let incoming = dag.incoming(node_id);
                 let input = if incoming.is_empty() {
-                    // Body entry: take from seeded results.
                     results
                         .remove(&node_id)
                         .with_context(|| format!("node not found: {node_id:?}"))?
@@ -114,7 +160,11 @@ impl Executor {
 
                 // Execute the node's workflow.
                 let node = dag.get_node(node_id).with_context(|| format!("node not found: {node_id:?}"))?;
-                if let Some(ref wf) = node.workflow {
+                if matches!(node.kind, NodeKind::Clone { .. }) {
+                    // Clone (scatter-gather): execute via execute_node for full branch handling.
+                    let result = Self::execute_node(dag, node_id, input, ctx).await?;
+                    results.insert(node_id, result);
+                } else if let Some(ref wf) = node.workflow {
                     let result = wf
                         .execute_erased(input, ctx)
                         .await
@@ -128,29 +178,5 @@ impl Executor {
 
             results.remove(&body_exit).with_context(|| format!("node not found: {body_exit:?}"))
         })
-    }
-
-    /// If a node has a paired error handler, invoke it.
-    pub(super) async fn try_error_handler(
-        dag: &WorkflowDag,
-        failed_node: NodeId,
-        error: &anyhow::Error,
-        ctx: &ExecutionContext,
-    ) -> anyhow::Result<Option<BoxedValue>> {
-        for node in dag.nodes().values() {
-            if let NodeKind::Error { paired_with } = &node.kind {
-                if *paired_with == failed_node {
-                    if let Some(ref handler) = node.workflow {
-                        let error_input: BoxedValue = Box::new(error.to_string());
-                        let result = handler
-                            .execute_erased(error_input, ctx)
-                            .await
-                            .context(format!("error handler failed for node {failed_node:?}"))?;
-                        return Ok(Some(result));
-                    }
-                }
-            }
-        }
-        Ok(None)
     }
 }

@@ -2,6 +2,7 @@ use super::*;
 use crate::workflow::definition::{into_erased, Workflow};
 use crate::workflow::model::ExecutionContext;
 use async_trait::async_trait;
+use std::any::TypeId;
 
 struct AddOne;
 #[async_trait]
@@ -84,20 +85,58 @@ fn type_mismatch_rejected() {
 }
 
 #[test]
-fn broadcast_node() {
+fn scatter_gather_node() {
+    use std::any::TypeId;
+    use crate::workflow::dag::{make_clone_fn, ProductJoinFn};
+
     let mut builder = DagBuilder::new();
     let a = builder.add_workflow("add_one", into_erased(AddOne));
-    let bc = builder.add_broadcast::<i32>();
-    let b = builder.add_workflow("mul_two", into_erased(MulTwo));
-    let c = builder.add_workflow("add_one_2", into_erased(AddOne));
+    let gather_fn: ProductJoinFn = Box::new(|vals| {
+        let a = *vals[0].downcast_ref::<i32>().unwrap();
+        let b = *vals[1].downcast_ref::<i32>().unwrap();
+        Box::new((a, b))
+    });
+    let sg = builder.add_scatter_gather(
+        TypeId::of::<i32>(),
+        make_clone_fn::<i32>(),
+        vec![into_erased(MulTwo), into_erased(AddOne)],
+        gather_fn,
+        TypeId::of::<(i32, i32)>(),
+    );
+    let b = builder.add("process", |input: (i32, i32)| async move {
+        Ok::<i32, WorkflowError>(input.0 + input.1)
+    });
 
-    builder.connect(a, bc).unwrap();
-    builder.connect(bc, b).unwrap();
-    builder.connect(bc, c).unwrap();
+    builder.connect(a, sg).unwrap();
+    builder.connect(sg, b).unwrap();
     builder.set_entry(a).unwrap();
+    builder.set_exit(b).unwrap();
 
     let dag = builder.build().unwrap();
-    assert_eq!(dag.outgoing(bc).len(), 2);
+    assert_eq!(dag.topo_order().len(), 3);
+}
+
+#[test]
+fn sum_match_node() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("result_src", |input: i32| async move {
+        Ok::<Result<i32, String>, WorkflowError>(if input > 0 { Ok(input) } else { Err("negative".into()) })
+    });
+    let sm = builder.add_sum_match::<i32, String>();
+    let ok_handler = builder.add("ok_path", |input: i32| async move {
+        Ok::<String, WorkflowError>(format!("ok: {input}"))
+    });
+    let err_handler = builder.add("err_path", |input: String| async move {
+        Ok::<String, WorkflowError>(format!("err: {input}"))
+    });
+
+    builder.connect(src, sm).unwrap();
+    builder.connect_labeled(sm, ok_handler, "ok").unwrap();
+    builder.connect_labeled(sm, err_handler, "err").unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(ok_handler).unwrap();
+
+    let dag = builder.build().unwrap();
     assert_eq!(dag.topo_order().len(), 4);
 }
 

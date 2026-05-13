@@ -1,333 +1,76 @@
-//! # 内建工作流标准库
+//! **DEPRECATED**: 此模块已拆分为 `services`（Layer 1）和 `builtin`（Layer 2）。
 //!
-//! 提供不可再分的原子工作流实现。这些工作流可以直接使用，
-//! 也可以作为 DAG 中的节点。
+//! - 原子能力（Map、Predicate 等）→ [`services`](crate::workflow::services)
+//! - 预构建工作流（AddOne、IsPositive 等）→ [`builtin`](crate::workflow::builtin)
 //!
-//! ## 可用工作流
-//!
-//! | 工作流 | 输入 → 输出 | 说明 |
-//! |--------|-------------|------|
-//! | [`Identity`] | `T → T` | 透传，原样返回输入 |
-//! | [`Map`] | `I → O` | 应用同步闭包 `Fn(I) → O` |
-//! | [`Predicate`] | `T → bool` | 应用判断闭包 `Fn(&T) → bool` |
-//! | [`Constant`] | `I → O` | 忽略输入，总是返回固定值 |
-//! | [`Log`] | `T → T` | 用 `tracing::info!` 记录值并透传 |
-//! | [`Delay`] | `T → T` | 等待指定时长后透传 |
-//! | [`StateNode`] / [`state_node`] | `T → T` | 透传，携带共享 [`StateStore`](crate::workflow::model::StateStore) |
-//!
-//! ## 示例
-//!
-//! ```rust
-//! use intelligent_subject::workflow::builtin_workflows::{Identity, Map, Predicate};
-//! use intelligent_subject::workflow::definition::Workflow;
-//! use intelligent_subject::workflow::model::ExecutionContext;
-//! use intelligent_subject::workflow::error::WorkflowError;
-//! use async_trait::async_trait;
-//!
-//! # #[tokio::main]
-//! # async fn example(_ctx: &ExecutionContext) -> Result<(), WorkflowError> {
-//! // Map: i32 → String
-//! let map = Map::new(|x: i32| x.to_string());
-//! // Predicate: i32 → bool
-//! let pred = Predicate::new(|x: &i32| *x > 0);
-//! # Ok(())
-//! # }
-//! ```
-use std::fmt::Debug;
-use std::marker::PhantomData;
+//! 此模块为向后兼容保留，所有类型均标记为 deprecated。
+
 use std::sync::Arc;
-use std::time::Duration;
 
-use async_trait::async_trait;
-use tracing;
+use crate::workflow::model::StateStore;
 
-use crate::workflow::error::WorkflowError;
-use crate::workflow::definition::Workflow;
-use crate::workflow::model::{ExecutionContext, StateStore};
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `workflow::services::MapFn` instead. MapFn does not implement Workflow trait."
+)]
+pub use crate::workflow::services::MapFn as Map;
 
-/// Identity workflow: passes input through unchanged.
-pub struct Identity<T>(PhantomData<fn() -> T>);
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `workflow::services::PredicateFn` instead. PredicateFn does not implement Workflow trait."
+)]
+pub use crate::workflow::services::PredicateFn as Predicate;
 
-impl<T> Identity<T> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `workflow::services::Identity` instead. Identity does not implement Workflow trait."
+)]
+pub use crate::workflow::services::Identity;
 
-impl<T> Default for Identity<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `workflow::services::Constant` instead. Constant does not implement Workflow trait."
+)]
+pub use crate::workflow::services::Constant;
 
-#[async_trait]
-impl<T: Send + Sync + 'static> Workflow<T, T> for Identity<T> {
-    fn name(&self) -> &str {
-        "identity"
-    }
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `workflow::services::LogService` instead. LogService does not implement Workflow trait."
+)]
+pub use crate::workflow::services::LogService as Log;
 
-    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
-        Ok(input)
-    }
-}
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `workflow::services::DelayService` instead. DelayService does not implement Workflow trait."
+)]
+pub use crate::workflow::services::DelayService as Delay;
 
-/// Map workflow: applies an async function to the input.
-pub struct Map<I, O, F> {
-    f: F,
-    _marker: PhantomData<fn() -> (I, O)>,
-}
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `workflow::services::StateCarrier` instead. StateCarrier does not implement Workflow trait."
+)]
+pub use crate::workflow::services::StateCarrier as StateNode;
 
-impl<I, O, F> Map<I, O, F>
-where
-    F: Fn(I) -> O + Send + Sync,
-{
-    pub fn new(f: F) -> Self {
-        Self {
-            f,
-            _marker: PhantomData,
-        }
-    }
-}
-
-#[async_trait]
-impl<I: Send + Sync + 'static, O: Send + Sync + 'static, F: Fn(I) -> O + Send + Sync> Workflow<I, O>
-    for Map<I, O, F>
-{
-    fn name(&self) -> &str {
-        "map"
-    }
-
-    async fn execute(&self, input: I, _ctx: &ExecutionContext) -> Result<O, WorkflowError> {
-        Ok((self.f)(input))
-    }
-}
-
-/// Predicate workflow: evaluates a condition on the input, outputs `bool`.
-pub struct Predicate<T, P> {
-    predicate: P,
-    _marker: PhantomData<fn() -> T>,
-}
-
-impl<T, P> Predicate<T, P>
-where
-    P: Fn(&T) -> bool + Send + Sync,
-{
-    pub fn new(predicate: P) -> Self {
-        Self {
-            predicate,
-            _marker: PhantomData,
-        }
-    }
-}
-
-#[async_trait]
-impl<T: Send + Sync + 'static, P: Fn(&T) -> bool + Send + Sync> Workflow<T, bool> for Predicate<T, P> {
-    fn name(&self) -> &str {
-        "predicate"
-    }
-
-    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<bool, WorkflowError> {
-        Ok((self.predicate)(&input))
-    }
-}
-
-/// Constant workflow: always produces the same output, ignoring input.
-pub struct Constant<I, O> {
-    value: O,
-    _marker: PhantomData<fn() -> I>,
-}
-
-impl<I, O: Clone> Constant<I, O> {
-    pub fn new(value: O) -> Self {
-        Self {
-            value,
-            _marker: PhantomData,
-        }
-    }
-}
-
-#[async_trait]
-impl<I: Send + Sync + 'static, O: Clone + Send + Sync + 'static> Workflow<I, O> for Constant<I, O> {
-    fn name(&self) -> &str {
-        "constant"
-    }
-
-    async fn execute(&self, _input: I, _ctx: &ExecutionContext) -> Result<O, WorkflowError> {
-        Ok(self.value.clone())
-    }
-}
-
-/// Log workflow: logs the input at info level and passes it through unchanged.
-pub struct Log<T: Debug>(PhantomData<fn() -> T>);
-
-impl<T: Debug> Log<T> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
-
-impl<T: Debug> Default for Log<T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl<T: Debug + Send + Sync + 'static> Workflow<T, T> for Log<T> {
-    fn name(&self) -> &str {
-        "log"
-    }
-
-    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
-        tracing::info!(value = ?input, type = std::any::type_name::<T>(), "workflow value");
-        Ok(input)
-    }
-}
-
-/// Delay workflow: sleeps for a specified duration, then passes input through.
-pub struct Delay<T> {
-    duration: Duration,
-    _marker: PhantomData<fn() -> T>,
-}
-
-impl<T> Delay<T> {
-    pub fn new(duration: Duration) -> Self {
-        Self {
-            duration,
-            _marker: PhantomData,
-        }
-    }
-}
-
-#[async_trait]
-impl<T: Send + Sync + 'static> Workflow<T, T> for Delay<T> {
-    fn name(&self) -> &str {
-        "delay"
-    }
-
-    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
-        tokio::time::sleep(self.duration).await;
-        Ok(input)
-    }
-}
-
-/// State workflow: passthrough node that carries a shared [`StateStore`].
-///
-/// The node itself does nothing at execution time — input passes through unchanged.
-/// Users capture `Arc<StateStore>` in other closures to read/write shared state.
-///
-/// # 示例
-///
-/// ```rust
-/// use intelligent_subject::workflow::builtin_workflows::{state_node, Map};
-/// use intelligent_subject::workflow::dag::DagBuilder;
-/// use intelligent_subject::workflow::model::StateStore;
-/// use std::sync::Arc;
-///
-/// let store = Arc::new(StateStore::new());
-/// let mut builder = DagBuilder::new();
-/// let s = builder.add_workflow("state", state_node::<i32>(store.clone()));
-/// ```
-#[allow(dead_code)] // store kept alive to share state across closures
-pub struct StateNode<T> {
+/// **DEPRECATED**: Use `workflow::services::StateCarrier` + `workflow::definition::into_erased`.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `services::StateCarrier` + `definition::into_erased` instead."
+)]
+#[allow(deprecated)]
+pub fn state_node<T: Send + Sync + 'static>(
     store: Arc<StateStore>,
-    _marker: PhantomData<fn() -> T>,
-}
-
-#[async_trait]
-impl<T: Send + Sync + 'static> Workflow<T, T> for StateNode<T> {
-    fn name(&self) -> &str {
-        "state"
-    }
-
-    async fn execute(&self, input: T, _ctx: &ExecutionContext) -> Result<T, WorkflowError> {
-        Ok(input)
-    }
-}
-
-/// Create a state node that passes input through unchanged.
-///
-/// The returned workflow holds a reference to the given [`StateStore`].
-/// Capture `Arc<StateStore>` in other closures to share state across workflows.
-pub fn state_node<T: Send + Sync + 'static>(store: Arc<StateStore>) -> Box<dyn super::definition::ErasedWorkflow> {
-    super::definition::into_erased(StateNode::<T> {
-        store,
-        _marker: PhantomData,
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::workflow::platform::NullPlatform;
-    use std::sync::Arc;
-
-    fn make_ctx() -> ExecutionContext {
-        ExecutionContext {
-            platform: Arc::new(NullPlatform::new()),
-        }
-    }
-
-    #[tokio::test]
-    async fn identity() {
-        let wf = Identity::<i32>::new();
-        let ctx = make_ctx();
-        let result = wf.execute(42, &ctx).await.unwrap();
-        assert_eq!(result, 42);
-    }
-
-    #[tokio::test]
-    async fn map() {
-        let wf = Map::new(|x: i32| x * 3);
-        let ctx = make_ctx();
-        let result = wf.execute(5, &ctx).await.unwrap();
-        assert_eq!(result, 15);
-    }
-
-    #[tokio::test]
-    async fn predicate() {
-        let wf = Predicate::new(|x: &i32| *x > 0);
-        let ctx = make_ctx();
-        assert!(wf.execute(5, &ctx).await.unwrap());
-        assert!(!wf.execute(-1, &ctx).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn constant() {
-        let wf = Constant::<i32, &str>::new("hello");
-        let ctx = make_ctx();
-        let result = wf.execute(999, &ctx).await.unwrap();
-        assert_eq!(result, "hello");
-    }
-
-    #[tokio::test]
-    async fn log_passthrough() {
-        let wf = Log::<i32>::new();
-        let ctx = make_ctx();
-        let result = wf.execute(42, &ctx).await.unwrap();
-        assert_eq!(result, 42);
-    }
-
-    #[tokio::test]
-    async fn delay_passthrough() {
-        let wf = Delay::new(Duration::from_millis(1));
-        let ctx = make_ctx();
-        let result = wf.execute("test", &ctx).await.unwrap();
-        assert_eq!(result, "test");
-    }
-
-    #[tokio::test]
-    async fn state_node_passthrough() {
-        let store = Arc::new(StateStore::new());
-        store.set("key", 42i32, None);
-        let wf = StateNode::<i32> {
-            store: store.clone(),
-            _marker: PhantomData,
-        };
-        let ctx = make_ctx();
-        let result = wf.execute(99, &ctx).await.unwrap();
-        assert_eq!(result, 99);
-        // Store is still accessible.
-        assert_eq!(store.get::<i32>("key"), Some(42));
-    }
+) -> Box<dyn crate::workflow::definition::ErasedWorkflow> {
+    // StateCarrier doesn't implement Workflow, so we use from_fn to create a passthrough
+    crate::workflow::definition::from_fn(
+        "state",
+        move |_input: T, _ctx: &crate::workflow::model::ExecutionContext| {
+            let _store = store.clone();
+            async move {
+                // The store is kept alive via the closure capture.
+                // Users should capture Arc<StateStore> separately in other closures
+                // to actually read/write state.
+                Ok::<T, crate::workflow::error::WorkflowError>(_input)
+            }
+        },
+    )
 }
