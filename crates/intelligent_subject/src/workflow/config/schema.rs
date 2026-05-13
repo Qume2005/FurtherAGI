@@ -13,10 +13,10 @@
 //!
 //! ## 实现特色
 //!
-//! - 以 XML 元素名区分 8 种节点类型（`<node>`、`<clone>`、`<conditional>` 等），
+//! - 以 XML 元素名区分 8 种节点类型（`<node>`、`<clone>`、`<conditional>`、`<sum-match>` 等），
 //!   无需 `kind` 属性字段
 //! - XML 属性天然支持 `type` 关键字，无需 Rust 保留字重命名
-//! - `nodes` 使用 `Vec<(String, NodeConfig>` 保持 XML 文档中的声明顺序
+//! - `nodes` 使用 `Vec<(String, NodeConfig)>` 保持 XML 文档中的声明顺序
 //! - `edges` 可以为空（单节点工作流如 Loop、SubWorkflow 无需边）
 //!
 //! ## 依赖
@@ -28,7 +28,7 @@
 //!
 //! ## 示例
 //!
-//! **完整的 6 种节点类型 XML 配置：**
+//! **完整的 8 种节点类型 XML 配置：**
 //!
 //! ```xml
 //! <workflow name="full_example" entry="input" exit="output">
@@ -38,7 +38,12 @@
 //!   <node name="body_start" implementation="step"/>
 //!   <node name="body_end" implementation="step"/>
 //!   <loop name="iterate" count="3" body-entry="body_start" body-exit="body_end"/>
-//!   <clone name="fan_out" type="i32"/>
+//!   <clone name="fan_out" type="i32" output-type="(i32,i32)" gather="my_gather">
+//!     <branch implementation="mul_two"/>
+//!     <branch implementation="add_one"/>
+//!   </clone>
+//!   <sum-match name="result_split" ok-type="i32" err-type="String"/>
+//!   <product-join name="merge" output-type="(i32,bool)" input-types="i32,bool" join="my_join"/>
 //!   <sub-workflow name="sub" workflow="other_pipeline" input-type="i32" output-type="String"/>
 //!   <connection name="output" label="出口" type="String"/>
 //! </workflow>
@@ -84,7 +89,7 @@ pub struct WorkflowMeta {
 /// | XML 元素 | 变体 | 说明 |
 /// |----------|------|------|
 /// | `<node>` | `Workflow` | 工作流实现节点 |
-/// | `<clone>` | `Clone` | 克隆扇出节点 |
+/// | `<clone>` | `Clone` | Scatter-gather 节点：并行分支 + gather 元组输出 |
 /// | `<conditional>` | `Conditional` | 条件分支节点 |
 /// | `<loop>` | `Loop` | 固定次数循环节点 |
 /// | `<sub-workflow>` | `SubWorkflow` | 子工作流引用节点 |

@@ -2,7 +2,7 @@
 //!
 //! 演示如何：
 //! - 创建 `Arc<StateStore>` 并在闭包之间捕获共享
-//! - 使用 `state_node` 构建一个透传节点（将输入原样传递，同时持有 store 引用）
+//! - 使用 `StateCarrier` 服务 + `from_fn` 构建透传节点（持有 store 引用）
 //! - 两次执行同一个 DAG，展示状态跨运行持久化
 //! - 使用 TTL 让条目在指定时间后过期
 //!
@@ -11,7 +11,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use intelligent_subject::workflow::builtin_workflows::state_node;
 use intelligent_subject::workflow::dag::DagBuilder;
 use intelligent_subject::workflow::error::WorkflowError;
 use intelligent_subject::workflow::executor::Executor;
@@ -21,6 +20,7 @@ use intelligent_subject::workflow::platform::NullPlatform;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let store = Arc::new(StateStore::new());
+    let store_for_closure = store.clone();
     let store_clone = store.clone();
 
     let ctx = ExecutionContext {
@@ -28,9 +28,14 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let mut builder = DagBuilder::new();
-    // state_node 是一个透传节点：输入直接输出，但同时持有 Arc<StateStore>，
-    // 使同一 store 可被 DAG 中其他节点的闭包捕获。
-    let s = builder.add_workflow("state", state_node::<i32>(store.clone()));
+    // from_fn 构建透传节点：输入直接输出，同时通过闭包捕获持有 Arc<StateStore>
+    let s = builder.add_with_ctx("state", move |input: i32, _ctx: &ExecutionContext| {
+        let _store = store_for_closure.clone();
+        async move {
+            // store 通过闭包捕获保持存活，其他节点的闭包可以单独捕获 Arc<StateStore>
+            Ok::<i32, WorkflowError>(input)
+        }
+    });
     let step = builder.add("accumulate", move |input: i32| {
         let s = store_clone.clone();
         async move {

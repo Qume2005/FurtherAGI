@@ -8,7 +8,7 @@
 //! - **Workflow** — 强类型的「输入 → 处理 → 输出」管道，由 [`workflow::definition::Workflow`] trait 定义
 //! - **DAG** — 由 [`workflow::dag::WorkflowDag`] 表示的有向无环图，描述组合工作流的拓扑
 //! - **WorkflowManager** — 中央注册器，管理所有工作流的生命周期和依赖校验
-//! - **WorkPlatform** — 运行时上下文，提供工作平台
+//! - **WorkPlatform** — 运行时上下文，提供工作平台能力（文件系统、容器等）
 //!
 //! ## 三层架构
 //!
@@ -23,7 +23,7 @@
 //! | NodeKind | 说明 |
 //! |----------|------|
 //! | `Workflow` | 工作流实现节点 |
-//! | `Clone` | 克隆扇出节点 |
+//! | `Clone` | Scatter-gather 节点：并行分支 + gather 元组输出 |
 //! | `Conditional` | 条件分支节点（true/false） |
 //! | `Loop` | 固定次数循环节点 |
 //! | `SubWorkflow` | 子工作流引用节点 |
@@ -35,7 +35,7 @@
 //!
 //! - 类型擦除执行通过 `ErasedWorkflow` + `TypeId` 实现，在注册时校验类型安全，执行时 downcast 恢复
 //! - 通过 Kahn 算法实现层级并行执行，同一拓扑层的节点并发运行
-//! - 支持条件路由、循环、克隆扇出、和/积类型组合
+//! - 支持条件路由、循环、scatter-gather、和/积类型组合
 //! - XML 声明式构建与运行时代码驱动构建双路径
 //!
 //! ## 快速开始
