@@ -15,7 +15,7 @@
 //! - 宿主机临时目录 bind mount 到容器 `/workspace`，文件自动同步
 //! - 容器运行 `sleep infinity` 保持活跃，通过 `docker exec` 执行具体命令
 //! - `run_command` 使用 `docker exec` 并捕获 stdout/stderr 流式输出
-//! - 非零退出码触发 [`PlatformError::CommandFailed`](super::PlatformError::CommandFailed)
+//! - 非零退出码触发 [`PlatformError::CommandFailed`](PlatformError::CommandFailed)
 //! - `cleanup` 停止并删除容器（临时目录在析构时自动清理）
 //!
 //! ## 依赖

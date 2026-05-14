@@ -1,19 +1,19 @@
 //! # 执行引擎 — 节点分派与辅助方法
 //!
-//! 实现 [`Executor`](super::Executor) 的单节点执行分派和辅助方法。
+//! 实现 [`Executor`](Executor) 的单节点执行分派和辅助方法。
 //!
 //! ## 功能实现
 //!
-//! - **[`execute_node()`**](super::Executor::execute_node) — 根据 [`NodeKind`](crate::workflow::dag::NodeKind)
+//! - **[`execute_node()`**](Executor::execute_node) — 根据 [`NodeKind`](NodeKind)
 //!   分派到对应处理逻辑
-//! - **[`execute_body()`**](super::Executor::execute_body) — 为 Loop 节点执行 body_entry 到 body_exit 的子图
-//! - **[`collect_body_nodes()`**](super::Executor::collect_body_nodes) — 识别属于循环体的节点，在主遍历中跳过
+//! - **[`execute_body()`**](Executor::execute_body) — 为 Loop 节点执行 body_entry 到 body_exit 的子图
+//! - **[`collect_body_nodes()`**](Executor::collect_body_nodes) — 识别属于循环体的节点，在主遍历中跳过
 
 use anyhow::Context;
 
 use super::*;
 
-use super::engine::SumMatchCarrier;
+use super::engine::{SumMatchCarrier, DispatchCarrier};
 
 impl Executor {
     /// Collect all NodeIds that are part of a Loop node's body subgraph.
@@ -128,6 +128,25 @@ impl Executor {
                 // Input has already been combined by the join_fn in the main loop.
                 Ok(input)
             }
+            NodeKind::Reshape => {
+                tracing::debug!(node = ?node_id, "reshape execution");
+                let reshape_fn = dag.reshape_fn(node_id)
+                    .context("reshape node has no reshape function")?;
+                Ok(reshape_fn(input))
+            }
+            NodeKind::Dispatch { output_count } => {
+                tracing::debug!(node = ?node_id, outputs = output_count, "dispatch execution");
+                let dispatch_fn = dag.dispatch_fn(node_id)
+                    .context("dispatch node has no dispatch function")?;
+                let values = dispatch_fn(input);
+                if values.len() != *output_count {
+                    anyhow::bail!(
+                        "dispatch node {:?}: expected {} outputs, got {}",
+                        node_id, output_count, values.len()
+                    );
+                }
+                Ok(Box::new(DispatchCarrier { values }))
+            }
         }
     }
 
@@ -138,7 +157,7 @@ impl Executor {
         body_exit: NodeId,
         results: &'a mut HashMap<NodeId, BoxedValue>,
         ctx: &'a ExecutionContext,
-    ) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<BoxedValue>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<BoxedValue>> + Send + 'a>> {
         Box::pin(async move {
             let topo = dag.topo_order();
             let start = topo.iter().position(|&id| id == body_entry).unwrap_or(0);

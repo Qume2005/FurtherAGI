@@ -6,7 +6,7 @@
 //!
 //! [`Executor::execute()`] 按 DAG 的拓扑层级遍历节点，在每个层级通过 `join_all` 并发
 //! 执行所有节点。处理条件分支路由、或类型 `T | E` 拆解路由、和类型 `(A, B)` 合并、
-//! 循环体子图迭代和 scatter-gather。
+//! 元组重组、积类型拆分分发、循环体子图迭代和 scatter-gather。
 
 use anyhow::Context;
 
@@ -94,12 +94,17 @@ impl Executor {
                     Ok(join_fn(collected))
                 } else {
                     // Standard single-input gathering.
-                    let incoming = dag.incoming(node_id);
-                    if incoming.is_empty() {
-                        results.remove(&node_id).with_context(|| format!("node not found: {node_id:?}"))
+                    // Check if input was pre-populated by a Dispatch upstream.
+                    if let Some(pre_filled) = results.remove(&node_id) {
+                        Ok(pre_filled)
                     } else {
-                        let from = incoming[0].from;
-                        results.remove(&from).with_context(|| format!("node not found: {from:?}"))
+                        let incoming = dag.incoming(node_id);
+                        if incoming.is_empty() {
+                            results.remove(&node_id).with_context(|| format!("node not found: {node_id:?}"))
+                        } else {
+                            let from = incoming[0].from;
+                            results.remove(&from).with_context(|| format!("node not found: {from:?}"))
+                        }
                     }
                 };
                 level_inputs.insert(node_id, input);
@@ -124,8 +129,35 @@ impl Executor {
                         let node = dag.get_node(node_id);
                         let is_conditional = node.map_or(false, |n| matches!(n.kind, NodeKind::Conditional { .. }));
                         let is_sum_match = node.map_or(false, |n| matches!(n.kind, NodeKind::SumMatch { .. }));
+                        let is_dispatch = node.map_or(false, |n| matches!(n.kind, NodeKind::Dispatch { .. }));
 
-                        if is_sum_match {
+                        if is_dispatch {
+                            // Dispatch: handler wraps result in DispatchCarrier.
+                            match val.downcast::<DispatchCarrier>() {
+                                Ok(carrier_box) => {
+                                    let carrier = *carrier_box;
+                                    let outgoing = dag.outgoing(node_id);
+                                    // Move values out of carrier, one per outgoing edge.
+                                    let mut values = carrier.values.into_iter();
+                                    for edge in outgoing {
+                                        if let Some(v) = values.next() {
+                                            results.insert(edge.to, v);
+                                        }
+                                        if let Some(deg) = in_degree.get_mut(&edge.to) {
+                                            *deg = deg.saturating_sub(1);
+                                        }
+                                    }
+                                }
+                                Err(val) => {
+                                    results.insert(node_id, val);
+                                    for edge in dag.outgoing(node_id) {
+                                        if let Some(deg) = in_degree.get_mut(&edge.to) {
+                                            *deg = deg.saturating_sub(1);
+                                        }
+                                    }
+                                }
+                            }
+                        } else if is_sum_match {
                             // SumMatch: handler wraps result in SumMatchCarrier for routing.
                             match val.downcast::<SumMatchCarrier>() {
                                 Ok(carrier_box) => {
@@ -201,4 +233,10 @@ impl Executor {
 pub(super) struct SumMatchCarrier {
     pub value: BoxedValue,
     pub is_ok: bool,
+}
+
+/// Internal carrier used by Dispatch to communicate N split values back to the executor.
+pub(super) struct DispatchCarrier {
+    /// The split values, one per outgoing edge, in order.
+    pub values: Vec<BoxedValue>,
 }

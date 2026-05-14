@@ -14,6 +14,9 @@
 //! | [`LogService`] | tracing 日志 |
 //! | [`DelayService`] | 异步延迟 |
 //! | [`StateCarrier`] | 共享状态挂载 |
+//! | [`llm::LlmService`] | LLM 统一调用 trait |
+//! | [`llm::OpenAiService`] | OpenAI API 实现 |
+//! | [`llm::AnthropicService`] | Anthropic API 实现 |
 
 pub mod constant;
 pub mod delay;
@@ -23,7 +26,6 @@ pub mod map;
 pub mod predicate;
 pub mod state;
 
-#[cfg(feature = "llm")]
 pub mod llm;
 
 pub use constant::Constant;

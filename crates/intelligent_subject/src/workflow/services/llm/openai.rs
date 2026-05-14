@@ -49,7 +49,28 @@ struct OpenAiRequest {
 #[derive(Serialize, Deserialize)]
 struct OpenAiMessage {
     role: String,
-    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<Vec<OpenAiToolCallResponse>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+}
+
+/// OpenAI 响应中工具调用的序列化格式（用于在后续请求中回传）。
+#[derive(Serialize, Deserialize)]
+struct OpenAiToolCallResponse {
+    id: String,
+    r#type: String,
+    function: OpenAiFunctionCallResponse,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OpenAiFunctionCallResponse {
+    name: String,
+    arguments: String,
 }
 
 #[derive(Serialize)]
@@ -114,14 +135,39 @@ struct OpenAiErrorDetail {
 fn to_openai_messages(messages: &[ChatMessage]) -> Vec<OpenAiMessage> {
     messages
         .iter()
-        .map(|m| OpenAiMessage {
-            role: match m.role {
-                super::ChatRole::System => "system".to_string(),
-                super::ChatRole::User => "user".to_string(),
-                super::ChatRole::Assistant => "assistant".to_string(),
-                super::ChatRole::Tool => "tool".to_string(),
-            },
-            content: m.content.clone(),
+        .map(|m| {
+            let role = match m.role {
+                super::ChatRole::System => "system",
+                super::ChatRole::User => "user",
+                super::ChatRole::Assistant => "assistant",
+                super::ChatRole::Tool => "tool",
+            };
+
+            let tool_calls = m.tool_calls.as_ref().map(|calls| {
+                calls
+                    .iter()
+                    .map(|tc| OpenAiToolCallResponse {
+                        id: tc.id.clone(),
+                        r#type: "function".to_string(),
+                        function: OpenAiFunctionCallResponse {
+                            name: tc.name.clone(),
+                            arguments: tc.arguments.clone(),
+                        },
+                    })
+                    .collect()
+            });
+
+            OpenAiMessage {
+                role: role.to_string(),
+                content: if m.content.is_empty() && tool_calls.is_some() {
+                    None
+                } else {
+                    Some(m.content.clone())
+                },
+                tool_calls,
+                tool_call_id: m.tool_call_id.clone(),
+                name: m.name.clone(),
+            }
         })
         .collect()
 }

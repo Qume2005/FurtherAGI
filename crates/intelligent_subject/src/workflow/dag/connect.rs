@@ -1,23 +1,23 @@
 //! # DAG 构建器 — 连接与构建
 //!
-//! 在 [`DagBuilder`](super::DagBuilder) 上实现连接和构建方法。
+//! 在 [`DagBuilder`](DagBuilder) 上实现连接和构建方法。
 //!
 //! ## 功能实现
 //!
 //! 本模块提供 DAG 的边创建、入口/出口设置和最终构建方法：
 //!
-//! - **[`connect()`](super::DagBuilder::connect)** — 连接两个节点，立即校验类型兼容性
-//! - **[`connect_labeled()`](super::DagBuilder::connect_labeled)** — 带标签的连接（用于条件分支 `"true"` / `"false"`）
-//! - **[`set_entry()`](super::DagBuilder::set_entry)** — 指定 DAG 入口节点
-//! - **[`set_exit()`](super::DagBuilder::set_exit)** — 指定 DAG 出口节点
-//! - **[`build()`](super::DagBuilder::build)** — 消费 builder，执行环检测，生成不可变 `WorkflowDag`
+//! - **[`connect()`](DagBuilder::connect)** — 连接两个节点，立即校验类型兼容性
+//! - **[`connect_labeled()`](DagBuilder::connect_labeled)** — 带标签的连接（用于条件分支 `"true"` / `"false"`）
+//! - **[`set_entry()`](DagBuilder::set_entry)** — 指定 DAG 入口节点
+//! - **[`set_exit()`](DagBuilder::set_exit)** — 指定 DAG 出口节点
+//! - **[`build()`](DagBuilder::build)** — 消费 builder，执行环检测，生成不可变 `WorkflowDag`
 //!
 //! ## 实现特色
 //!
 //! - 即时类型校验：`connect()` 在调用时检查 `TypeId` 兼容性，而非推迟到 `build()`
 //! - `connect_labeled()` 为边添加字符串标签，支持条件分支路由
 //! - `build()` 使用 Kahn 算法计算拓扑排序并检测环
-//! - 拓扑排序缓存在 [`WorkflowDag`](super::WorkflowDag) 中，执行时直接复用
+//! - 拓扑排序缓存在 [`WorkflowDag`](WorkflowDag) 中，执行时直接复用
 //! - builder 在 `build()` 中被消费，防止构建后修改
 //!
 //! ## 依赖
@@ -25,7 +25,7 @@
 //! | 类别 | 依赖 |
 //! |------|------|
 //! | 外部 crate | 无 |
-//! | 内部模块 | [`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::NodeId`] |
+//! | 内部模块 | [`WorkflowError`]、[`NodeId`] |
 //!
 //! ## 示例
 //!
@@ -84,10 +84,12 @@ impl DagBuilder {
     pub fn connect(&mut self, from: NodeId, to: NodeId) -> Result<(), WorkflowError> {
         let to_kind = self.nodes.get(&to).map(|n| n.kind.clone());
 
-        // Skip type validation for SumMatch and ProductJoin (heterogeneous I/O)
+        // Skip type validation for nodes with heterogeneous I/O
         let skip_type_check = matches!(
             to_kind,
-            Some(NodeKind::SumMatch { .. }) | Some(NodeKind::ProductJoin { .. })
+            Some(NodeKind::SumMatch { .. })
+                | Some(NodeKind::ProductJoin { .. })
+                | Some(NodeKind::Dispatch { .. })
         );
 
         if !skip_type_check {
@@ -213,6 +215,8 @@ impl DagBuilder {
             sum_match_fns: self.sum_match_fns,
             product_join_fns: self.product_join_fns,
             product_join_input_clone_fns: self.product_join_input_clone_fns,
+            reshape_fns: self.reshape_fns,
+            dispatch_fns: self.dispatch_fns,
         }))
     }
 }

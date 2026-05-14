@@ -5,7 +5,7 @@
 //!
 //! ## 功能实现
 //!
-//! `NullPlatform` 是 [`WorkPlatform`](super::WorkPlatform) 的默认空实现。
+//! `NullPlatform` 是 [`WorkPlatform`](WorkPlatform) 的默认空实现。
 //! - `run_command` 始终返回空 stdout/stderr 和退出码 0（不执行任何实际命令）
 //! - `write_file` 和 `read_file` 在 `tempfile::TempDir` 中操作，生命周期结束时自动清理
 //! - `cleanup` 为空操作（TempDir 在析构时自动删除）

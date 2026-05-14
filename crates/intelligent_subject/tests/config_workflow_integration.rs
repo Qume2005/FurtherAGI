@@ -129,6 +129,87 @@ impl Workflow<i32, Result<i32, String>> for ErrResult {
     }
 }
 
+// Produces (i32, String) for dispatch testing.
+struct MakeTuple;
+#[async_trait]
+impl Workflow<i32, (i32, String)> for MakeTuple {
+    fn name(&self) -> &str { "make_tuple" }
+    async fn execute(
+        &self,
+        input: i32,
+        _ctx: &ExecutionContext,
+    ) -> Result<(i32, String), WorkflowError> {
+        Ok((input * 2, format!("n={input}")))
+    }
+}
+
+// Identity pass-through for (String, String) — used with join attribute.
+struct IdentityPair;
+#[async_trait]
+impl Workflow<(String, String), (String, String)> for IdentityPair {
+    fn name(&self) -> &str { "identity_pair" }
+    async fn execute(
+        &self,
+        input: (String, String),
+        _ctx: &ExecutionContext,
+    ) -> Result<(String, String), WorkflowError> {
+        Ok(input)
+    }
+}
+
+struct FormatInt;
+#[async_trait]
+impl Workflow<i32, String> for FormatInt {
+    fn name(&self) -> &str { "format_int" }
+    async fn execute(
+        &self,
+        input: i32,
+        _ctx: &ExecutionContext,
+    ) -> Result<String, WorkflowError> {
+        Ok(format!("i={input}"))
+    }
+}
+
+struct Upper;
+#[async_trait]
+impl Workflow<String, String> for Upper {
+    fn name(&self) -> &str { "upper" }
+    async fn execute(
+        &self,
+        input: String,
+        _ctx: &ExecutionContext,
+    ) -> Result<String, WorkflowError> {
+        Ok(input.to_uppercase())
+    }
+}
+
+// Produces (i32, i32) for reshape testing.
+struct MakePair;
+#[async_trait]
+impl Workflow<i32, (i32, i32)> for MakePair {
+    fn name(&self) -> &str { "make_pair" }
+    async fn execute(
+        &self,
+        input: i32,
+        _ctx: &ExecutionContext,
+    ) -> Result<(i32, i32), WorkflowError> {
+        Ok((input + 1, input * 2))
+    }
+}
+
+struct SumAll;
+#[async_trait]
+impl Workflow<((i32, i32), i32), i32> for SumAll {
+    fn name(&self) -> &str { "sum_all" }
+    async fn execute(
+        &self,
+        input: ((i32, i32), i32),
+        _ctx: &ExecutionContext,
+    ) -> Result<i32, WorkflowError> {
+        Ok(input.0.0 + input.0.1 + input.1)
+    }
+}
+
 // ── Shared context ──────────────────────────────────────────
 
 fn make_ctx() -> ExecutionContext {
@@ -150,6 +231,12 @@ fn make_builder() -> ConfigBuilder {
     workflows.register("format_err", || into_erased(FormatErr));
     workflows.register("ok_result", || into_erased(OkResult));
     workflows.register("err_result", || into_erased(ErrResult));
+    workflows.register("make_tuple", || into_erased(MakeTuple));
+    workflows.register("identity_pair", || into_erased(IdentityPair));
+    workflows.register("format_int", || into_erased(FormatInt));
+    workflows.register("upper", || into_erased(Upper));
+    workflows.register("make_pair", || into_erased(MakePair));
+    workflows.register("sum_all", || into_erased(SumAll));
     let mut builder = ConfigBuilder::new(types, workflows);
     // Register a gather function for (i32, i32) output.
     let gather_fn: ProductJoinFn = Box::new(|vals| {
@@ -164,6 +251,42 @@ fn make_builder() -> ConfigBuilder {
     );
     // Register sum-match for i32 | String.
     builder.register_sum_match::<i32, String>("i32", "String");
+    // Register dispatch factory: (i32, String) → [i32, String]
+    builder.register_dispatch(
+        "split_tuple",
+        2,
+        Box::new(|input| {
+            let (a, b) = input.downcast_ref::<(i32, String)>().unwrap();
+            vec![Box::new(*a) as Box<dyn std::any::Any + Send + Sync>, Box::new(b.clone())]
+        }),
+    );
+    // Register product-join factory: (String, String)
+    let str_join_fn: ProductJoinFn = Box::new(|vals| {
+        let a = vals[0].downcast_ref::<String>().unwrap().clone();
+        let b = vals[1].downcast_ref::<String>().unwrap().clone();
+        Box::new((a, b))
+    });
+    builder.register_product_join(
+        "str_tuple2_join",
+        std::any::TypeId::of::<(String, String)>(),
+        vec![
+            |val: &(dyn std::any::Any + Send + Sync)| -> Box<dyn std::any::Any + Send + Sync> {
+                Box::new(val.downcast_ref::<String>().unwrap().clone())
+            },
+            |val: &(dyn std::any::Any + Send + Sync)| -> Box<dyn std::any::Any + Send + Sync> {
+                Box::new(val.downcast_ref::<String>().unwrap().clone())
+            },
+        ],
+        str_join_fn,
+    );
+    // Register reshape factory: (i32, i32) → ((i32, i32), i32)
+    builder.register_reshape(
+        "pair_and_sum",
+        Box::new(|input| {
+            let (a, b) = *input.downcast_ref::<(i32, i32)>().unwrap();
+            Box::new(((a, b), a + b))
+        }),
+    );
     builder
 }
 
@@ -172,7 +295,7 @@ fn make_builder() -> ConfigBuilder {
 #[test]
 fn config_linear_pipeline() {
     let builder = make_builder();
-    let (id, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="pipeline" entry="a" exit="c">
@@ -185,14 +308,14 @@ fn config_linear_pipeline() {
         )
         .unwrap();
 
-    assert_eq!(id.as_str(), "pipeline");
-    assert_eq!(dag.topo_order().len(), 3);
+    assert_eq!(output.id.as_str(), "pipeline");
+    assert_eq!(output.dag.topo_order().len(), 3);
 }
 
 #[tokio::test]
 async fn config_linear_pipeline_execute() {
     let builder = make_builder();
-    let (workflow_id, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="pipeline" entry="a" exit="c">
@@ -206,7 +329,7 @@ async fn config_linear_pipeline_execute() {
         .unwrap();
 
     let mgr = WorkflowManager::new();
-    mgr.register_composite(workflow_id, dag).unwrap();
+    mgr.register_composite(output.id, output.dag).unwrap();
     mgr.validate_all().unwrap();
 
     let ctx = make_ctx();
@@ -221,7 +344,7 @@ async fn config_linear_pipeline_execute() {
 #[tokio::test]
 async fn config_scatter_gather() {
     let builder = make_builder();
-    let (workflow_id, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="sg_test" entry="src" exit="sg">
@@ -235,10 +358,10 @@ async fn config_scatter_gather() {
         )
         .unwrap();
 
-    assert_eq!(workflow_id.as_str(), "sg_test");
+    assert_eq!(output.id.as_str(), "sg_test");
 
     let mgr = WorkflowManager::new();
-    mgr.register_composite(workflow_id, dag).unwrap();
+    mgr.register_composite(output.id, output.dag).unwrap();
     mgr.validate_all().unwrap();
 
     let ctx = make_ctx();
@@ -253,7 +376,7 @@ async fn config_scatter_gather() {
 #[tokio::test]
 async fn config_loop_pipeline() {
     let builder = make_builder();
-    let (_workflow_id, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="loop_test" entry="loop1" exit="loop1">
@@ -264,7 +387,7 @@ async fn config_loop_pipeline() {
         .unwrap();
 
     let ctx = make_ctx();
-    let result = Executor::execute(&dag, Box::new(0i32), &ctx).await.unwrap();
+    let result = Executor::execute(&output.dag, Box::new(0i32), &ctx).await.unwrap();
     let output: &i32 = result.output.downcast_ref::<i32>().unwrap();
     // AddOne × 5 starting from 0 = 5
     assert_eq!(*output, 5);
@@ -273,7 +396,7 @@ async fn config_loop_pipeline() {
 #[tokio::test]
 async fn config_conditional_pipeline() {
     let builder = make_builder();
-    let (_, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="cond_test" entry="cond" exit="pos">
@@ -289,7 +412,7 @@ async fn config_conditional_pipeline() {
     let ctx = make_ctx();
 
     // Positive input
-    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
+    let result = Executor::execute(&output.dag, Box::new(5i32), &ctx).await.unwrap();
     let output: &i32 = result.output.downcast_ref::<i32>().unwrap();
     assert_eq!(*output, 100);
 }
@@ -345,7 +468,7 @@ fn config_unknown_node_reference_error() {
 #[test]
 fn config_sub_workflow_node() {
     let builder = make_builder();
-    let (id, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="with_sub" entry="sub" exit="sub">
@@ -354,14 +477,14 @@ fn config_sub_workflow_node() {
         )
         .unwrap();
 
-    assert_eq!(id.as_str(), "with_sub");
-    assert_eq!(dag.topo_order().len(), 1);
+    assert_eq!(output.id.as_str(), "with_sub");
+    assert_eq!(output.dag.topo_order().len(), 1);
 }
 
 #[tokio::test]
 async fn config_connection_passthrough() {
     let builder = make_builder();
-    let (workflow_id, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="conn_test" entry="a" exit="c">
@@ -378,10 +501,10 @@ async fn config_connection_passthrough() {
         )
         .unwrap();
 
-    assert_eq!(dag.topo_order().len(), 5);
+    assert_eq!(output.dag.topo_order().len(), 5);
 
     let mgr = WorkflowManager::new();
-    mgr.register_composite(workflow_id, dag).unwrap();
+    mgr.register_composite(output.id, output.dag).unwrap();
     mgr.validate_all().unwrap();
 
     let ctx = make_ctx();
@@ -396,7 +519,7 @@ async fn config_connection_passthrough() {
 #[tokio::test]
 async fn config_sum_match_ok_branch() {
     let builder = make_builder();
-    let (_, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="sm_ok" entry="src" exit="ok_path">
@@ -413,7 +536,7 @@ async fn config_sum_match_ok_branch() {
 
     let ctx = make_ctx();
     // ok_result(7)=Ok(21), SumMatch routes to ok, format_ok(21)="ok: 21"
-    let result = Executor::execute(&dag, Box::new(7i32), &ctx).await.unwrap();
+    let result = Executor::execute(&output.dag, Box::new(7i32), &ctx).await.unwrap();
     let output = result.output.downcast_ref::<String>().unwrap();
     assert_eq!(*output, "ok: 21");
 }
@@ -421,7 +544,7 @@ async fn config_sum_match_ok_branch() {
 #[tokio::test]
 async fn config_sum_match_err_branch() {
     let builder = make_builder();
-    let (_, dag) = builder
+    let output = builder
         .build_from_str(
             r#"
             <workflow name="sm_err" entry="src" exit="err_path">
@@ -438,7 +561,106 @@ async fn config_sum_match_err_branch() {
 
     let ctx = make_ctx();
     // err_result(5)=Err("bad: 5"), SumMatch routes to err, format_err("bad: 5")="err: bad: 5"
-    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
+    let result = Executor::execute(&output.dag, Box::new(5i32), &ctx).await.unwrap();
     let output = result.output.downcast_ref::<String>().unwrap();
     assert_eq!(*output, "err: bad: 5");
+}
+
+// ── Attribute syntax tests ────────────────────────────────────
+
+#[tokio::test]
+async fn config_dispatch_attribute() {
+    // <node dispatch="split_tuple" dispatch-count="2"/> should expand to
+    // node → __dispatch_node with edges rewritten.
+    let builder = make_builder();
+    let output = builder
+        .build_from_str(
+            r#"
+            <workflow name="dispatch_attr" entry="src" exit="join">
+              <node name="src" implementation="make_tuple" dispatch="split_tuple" dispatch-count="2"/>
+              <node name="left" implementation="format_int"/>
+              <node name="right" implementation="upper"/>
+              <node name="join" implementation="identity_pair" join="str_tuple2_join"/>
+              <connect from="src" to="left"/>
+              <connect from="src" to="right"/>
+              <connect from="left" to="join"/>
+              <connect from="right" to="join"/>
+            </workflow>"#,
+        )
+        .unwrap();
+
+    // src → __dispatch_src → [left, right] → __join_join → join (identity_pair)
+    assert!(output.dag.topo_order().len() >= 5);
+
+    let ctx = make_ctx();
+    // MakeTuple(5) = (10, "n=5"), dispatch splits to [10, "n=5"]
+    // FormatInt(10) = "i=10", Upper("n=5") = "N=5"
+    // ProductJoin: ("i=10", "N=5"), IdentityPair → ("i=10", "N=5")
+    let result = Executor::execute(&output.dag, Box::new(5i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<(String, String)>().unwrap();
+    assert_eq!(output.0, "i=10");
+    assert_eq!(output.1, "N=5");
+}
+
+#[tokio::test]
+async fn config_sum_match_attribute() {
+    // <node sum-match="i32/String"/> should expand to node → __summatch_node
+    let builder = make_builder();
+    let output = builder
+        .build_from_str(
+            r#"
+            <workflow name="sm_attr_ok" entry="src" exit="ok_path">
+              <node name="src" implementation="ok_result" sum-match="i32/String"/>
+              <node name="ok_path" implementation="format_ok"/>
+              <node name="err_path" implementation="format_err"/>
+              <connect from="src" to="ok_path" label="ok"/>
+              <connect from="src" to="err_path" label="err"/>
+            </workflow>"#,
+        )
+        .unwrap();
+
+    let ctx = make_ctx();
+    // ok_result(7) = Ok(21), sum-match routes ok to ok_path
+    let result = Executor::execute(&output.dag, Box::new(7i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<String>().unwrap();
+    assert_eq!(*output, "ok: 21");
+}
+
+#[tokio::test]
+async fn config_reshape_attribute() {
+    // <connect reshape="pair_and_sum"/> should insert synthetic reshape node
+    let builder = make_builder();
+    let output = builder
+        .build_from_str(
+            r#"
+            <workflow name="reshape_attr" entry="src" exit="dst">
+              <node name="src" implementation="make_pair"/>
+              <node name="dst" implementation="sum_all"/>
+              <connect from="src" to="dst" reshape="pair_and_sum"/>
+            </workflow>"#,
+        )
+        .unwrap();
+
+    // 3 nodes: src, __reshape_src_dst, dst
+    assert_eq!(output.dag.topo_order().len(), 3);
+
+    let ctx = make_ctx();
+    // MakePair(3) = (4, 6), Reshape → ((4, 6), 10), SumAll → 4+6+10=20
+    let result = Executor::execute(&output.dag, Box::new(3i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<i32>().unwrap();
+    assert_eq!(*output, 20);
+}
+
+#[test]
+fn config_dispatch_missing_count_error() {
+    let builder = make_builder();
+    let result = builder.build_from_str(
+        r#"
+        <workflow name="bad" entry="a" exit="a">
+          <node name="a" implementation="make_tuple" dispatch="split_tuple"/>
+        </workflow>"#,
+    );
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("dispatch-count"));
 }

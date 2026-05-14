@@ -19,6 +19,7 @@
 //! - 插件式工作平台：[`WorkPlatform`](platform::WorkPlatform) trait 支持 Null/Local/Docker 后端
 //! - XML 声明式构建：[`ConfigBuilder`](config::ConfigBuilder) 从配置文件构建 DAG
 //! - 和/或类型组合：[`ProductJoin`](dag::NodeKind::ProductJoin) 合并为 `(A, B, ...)`，[`SumMatch`](dag::NodeKind::SumMatch) 拆解 `T | E`
+//!   [`Reshape`](dag::NodeKind::Reshape) 重组元组嵌套，[`Dispatch`](dag::NodeKind::Dispatch) 拆分和类型到多条路径
 //!
 //! ## 快速开始
 //!
@@ -55,12 +56,11 @@
 //! | [`executor`] | Async 执行引擎：拓扑层级并行执行、条件路由、循环、或类型拆解、和类型合并 |
 //! | [`services`] | Layer 1 — 原子服务：`MapFn`、`PredicateFn`、`Identity`、`Constant`、`LogService` 等 |
 //! | [`builtin`] | Layer 2 — 预构建工作流：`Gt`、`Lt`、`Not`、`And`、`Or` 等 |
-//! | [`builtin_workflows`] | **DEPRECATED** — 向后兼容 shim |
 //! | [`workflow_manager`] | 中央注册器：`WorkflowManager`，支持注册、校验、类型擦除/强类型执行 |
 //! | [`config`] | Layer 3 — XML 配置驱动构建：`ConfigBuilder`、`TypeRegistry`、`WorkflowFactoryRegistry` |
+//! | [`tool_registry`] | 工具注册表：`ToolRegistry`，将工作流暴露为 LLM 可调用工具 |
 
 pub mod builtin;
-pub mod builtin_workflows;
 pub mod config;
 pub mod dag;
 pub mod error;
@@ -69,4 +69,5 @@ pub mod platform;
 pub mod definition;
 pub mod model;
 pub mod services;
+pub mod tool_registry;
 pub mod workflow_manager;

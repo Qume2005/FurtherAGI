@@ -8,7 +8,7 @@ use std::any::Any;
 use std::collections::HashMap;
 
 use crate::workflow::definition::ErasedWorkflow;
-use super::{Edge, Node, NodeId, ProductJoinFn, SumMatchDestructFn};
+use super::{Edge, Node, NodeId, ProductJoinFn, SumMatchDestructFn, ReshapeFn, DispatchFn};
 
 /// Type alias for the clone fan-out function.
 pub type CloneFn = fn(&(dyn Any + Send + Sync)) -> Box<dyn Any + Send + Sync>;
@@ -40,6 +40,10 @@ pub struct WorkflowDag {
     product_join_fns: HashMap<NodeId, ProductJoinFn>,
     /// Clone functions for ProductJoin input values (per node, ordered by edge).
     product_join_input_clone_fns: HashMap<NodeId, Vec<CloneFn>>,
+    /// Reshape functions for Reshape nodes.
+    reshape_fns: HashMap<NodeId, ReshapeFn>,
+    /// Dispatch functions for Dispatch nodes.
+    dispatch_fns: HashMap<NodeId, DispatchFn>,
 }
 
 impl std::fmt::Debug for WorkflowDag {
@@ -67,6 +71,8 @@ pub(super) struct DagParts {
     pub sum_match_fns: HashMap<NodeId, SumMatchDestructFn>,
     pub product_join_fns: HashMap<NodeId, ProductJoinFn>,
     pub product_join_input_clone_fns: HashMap<NodeId, Vec<CloneFn>>,
+    pub reshape_fns: HashMap<NodeId, ReshapeFn>,
+    pub dispatch_fns: HashMap<NodeId, DispatchFn>,
 }
 
 impl WorkflowDag {
@@ -84,6 +90,8 @@ impl WorkflowDag {
             sum_match_fns: parts.sum_match_fns,
             product_join_fns: parts.product_join_fns,
             product_join_input_clone_fns: parts.product_join_input_clone_fns,
+            reshape_fns: parts.reshape_fns,
+            dispatch_fns: parts.dispatch_fns,
         }
     }
 
@@ -155,5 +163,15 @@ impl WorkflowDag {
     /// Get the input clone functions for a ProductJoin node, if any.
     pub fn product_join_input_clone_fns(&self, id: NodeId) -> Option<&Vec<CloneFn>> {
         self.product_join_input_clone_fns.get(&id)
+    }
+
+    /// Get the reshape function for a Reshape node, if any.
+    pub fn reshape_fn(&self, id: NodeId) -> Option<&ReshapeFn> {
+        self.reshape_fns.get(&id)
+    }
+
+    /// Get the dispatch function for a Dispatch node, if any.
+    pub fn dispatch_fn(&self, id: NodeId) -> Option<&DispatchFn> {
+        self.dispatch_fns.get(&id)
     }
 }

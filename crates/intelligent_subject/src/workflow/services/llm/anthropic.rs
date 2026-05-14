@@ -37,7 +37,7 @@ impl AnthropicService {
 #[derive(Serialize)]
 struct AnthropicRequest {
     model: String,
-    messages: Vec<AnthropicMessage>,
+    messages: Vec<serde_json::Value>,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
@@ -45,12 +45,6 @@ struct AnthropicRequest {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<AnthropicTool>>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct AnthropicMessage {
-    role: String,
-    content: String,
 }
 
 #[derive(Serialize)]
@@ -95,28 +89,73 @@ struct AnthropicErrorDetail {
     message: String,
 }
 
-fn split_system_message(messages: &[ChatMessage]) -> (Option<String>, Vec<AnthropicMessage>) {
+/// Convert unified ChatMessages to Anthropic-format JSON messages.
+///
+/// Anthropic message format differs from OpenAI:
+/// - Assistant tool calls: `content: [{ type: "tool_use", id, name, input }]`
+/// - Tool results: `role: "user"`, `content: [{ type: "tool_result", tool_use_id, content }]`
+fn convert_messages(messages: &[ChatMessage]) -> (Option<String>, Vec<serde_json::Value>) {
+    use serde_json::{json, Value};
+
     let mut system = None;
-    let anthropic_msgs: Vec<AnthropicMessage> = messages
-        .iter()
-        .filter_map(|m| {
-            if matches!(m.role, super::ChatRole::System) {
-                system = Some(m.content.clone());
-                None
-            } else {
-                Some(AnthropicMessage {
-                    role: match m.role {
-                        super::ChatRole::User => "user".to_string(),
-                        super::ChatRole::Assistant => "assistant".to_string(),
-                        super::ChatRole::Tool => "user".to_string(),
-                        super::ChatRole::System => unreachable!(),
-                    },
-                    content: m.content.clone(),
-                })
+    let mut result = Vec::new();
+
+    for m in messages {
+        if matches!(m.role, super::ChatRole::System) {
+            system = Some(m.content.clone());
+            continue;
+        }
+
+        match m.role {
+            super::ChatRole::User => {
+                result.push(json!({
+                    "role": "user",
+                    "content": m.content,
+                }));
             }
-        })
-        .collect();
-    (system, anthropic_msgs)
+            super::ChatRole::Assistant => {
+                if let Some(ref tool_calls) = m.tool_calls {
+                    let mut content: Vec<Value> = Vec::new();
+                    if !m.content.is_empty() {
+                        content.push(json!({"type": "text", "text": m.content}));
+                    }
+                    for tc in tool_calls {
+                        let input: Value = serde_json::from_str(&tc.arguments)
+                            .unwrap_or(json!({}));
+                        content.push(json!({
+                            "type": "tool_use",
+                            "id": tc.id,
+                            "name": tc.name,
+                            "input": input,
+                        }));
+                    }
+                    result.push(json!({
+                        "role": "assistant",
+                        "content": content,
+                    }));
+                } else {
+                    result.push(json!({
+                        "role": "assistant",
+                        "content": m.content,
+                    }));
+                }
+            }
+            super::ChatRole::Tool => {
+                let tool_use_id = m.tool_call_id.as_deref().unwrap_or("");
+                result.push(json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": m.content,
+                    }],
+                }));
+            }
+            super::ChatRole::System => unreachable!(),
+        }
+    }
+
+    (system, result)
 }
 
 #[async_trait]
@@ -130,7 +169,7 @@ impl LlmService for AnthropicService {
         request: LlmRequest,
         tools: Vec<ToolDefinition>,
     ) -> Result<LlmResponse, LlmError> {
-        let (system, messages) = split_system_message(&request.messages);
+        let (system, messages) = convert_messages(&request.messages);
 
         let anthropic_tools = if tools.is_empty() {
             None

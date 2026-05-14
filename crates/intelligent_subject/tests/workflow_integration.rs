@@ -2,10 +2,9 @@ use intelligent_subject::workflow::dag::{DagBuilder, make_clone_fn, ProductJoinF
 use intelligent_subject::workflow::error::WorkflowError;
 use intelligent_subject::workflow::executor::Executor;
 use intelligent_subject::workflow::definition::{from_fn, into_erased, Workflow};
-use intelligent_subject::workflow::model::{ExecutionContext, StateStore};
+use intelligent_subject::workflow::model::ExecutionContext;
 use intelligent_subject::workflow::workflow_manager::WorkflowManager;
 use intelligent_subject::workflow::platform::NullPlatform;
-use intelligent_subject::workflow::builtin_workflows::state_node;
 use std::sync::Arc;
 use async_trait::async_trait;
 
@@ -214,38 +213,93 @@ async fn e2e_loop_in_manager() {
     assert_eq!(result, 3);
 }
 
-/// State node: share StateStore across closures via Arc capture.
+/// Reshape: restructure tuple nesting inside a WorkflowManager pipeline.
 #[tokio::test]
-async fn e2e_state_node_shared_store() {
-    let store = Arc::new(StateStore::new());
-    let store_clone = store.clone();
-
+async fn e2e_reshape() {
     let mut builder = DagBuilder::new();
-    let s = builder.add_workflow("state", state_node::<i32>(store.clone()));
-    let step = builder.add("accumulate", move |input: i32| {
-        let s = store_clone.clone();
-        async move {
-            let prev = s.get::<i32>("sum").unwrap_or(0);
-            let new_val = prev + input;
-            s.set("sum", new_val, None);
-            Ok::<i32, WorkflowError>(new_val)
-        }
+    let src = builder.add("src", |input: i32| async move {
+        Ok::<(i32, i32), WorkflowError>((input + 1, input * 2))
+    });
+    let reshape = builder.add_reshape(Box::new(|input| {
+        let (a, b) = *input.downcast_ref::<(i32, i32)>().unwrap();
+        Box::new(((a, b), a + b))
+    }));
+    let dst = builder.add("dst", |input: ((i32, i32), i32)| async move {
+        Ok::<i32, WorkflowError>(input.0 .0 + input.0 .1 + input.1)
     });
 
-    builder.connect(s, step).unwrap();
-    builder.set_entry(s).unwrap();
-    builder.set_exit(step).unwrap();
+    builder.connect(src, reshape).unwrap();
+    builder.connect(reshape, dst).unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(dst).unwrap();
+
     let dag = builder.build().unwrap();
+    let mgr = WorkflowManager::new();
+    mgr.register_composite("reshape_test", dag).unwrap();
+    mgr.validate_all().unwrap();
 
     let ctx = make_ctx();
+    let result: i32 = mgr.execute_typed("reshape_test", 3, &ctx).await.unwrap();
+    // src: (4, 6), reshape: ((4, 6), 10), dst: 4+6+10=20
+    assert_eq!(result, 20);
+}
 
-    // First run: 0 + 10 = 10
-    let r1 = Executor::execute(&dag, Box::new(10i32), &ctx).await.unwrap();
-    assert_eq!(*r1.output.downcast_ref::<i32>().unwrap(), 10);
-    assert_eq!(store.get::<i32>("sum"), Some(10));
+/// Dispatch: split a tuple into multiple paths, process independently, rejoin.
+#[tokio::test]
+async fn e2e_dispatch() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("src", |input: i32| async move {
+        Ok::<(i32, String), WorkflowError>((input * 2, format!("n={}", input)))
+    });
+    let dispatch = builder.add_dispatch(
+        2,
+        Box::new(|input| {
+            let (a, b) = input.downcast_ref::<(i32, String)>().unwrap();
+            vec![
+                Box::new(*a) as Box<dyn std::any::Any + Send + Sync>,
+                Box::new(b.clone()),
+            ]
+        }),
+    );
+    let int_path = builder.add("int_path", |input: i32| async move {
+        Ok::<String, WorkflowError>(format!("i={}", input))
+    });
+    let str_path = builder.add("str_path", |input: String| async move {
+        Ok::<String, WorkflowError>(input.to_uppercase())
+    });
 
-    // Second run: 10 + 20 = 30
-    let r2 = Executor::execute(&dag, Box::new(20i32), &ctx).await.unwrap();
-    assert_eq!(*r2.output.downcast_ref::<i32>().unwrap(), 30);
-    assert_eq!(store.get::<i32>("sum"), Some(30));
+    // Rejoin with ProductJoin
+    let gather_fn: ProductJoinFn = Box::new(|vals| {
+        let a = vals[0].downcast_ref::<String>().unwrap().clone();
+        let b = vals[1].downcast_ref::<String>().unwrap().clone();
+        Box::new((a, b))
+    });
+    let join = builder.add_product_join(
+        std::any::TypeId::of::<(String, String)>(),
+        vec![
+            |val: &(dyn std::any::Any + Send + Sync)| -> Box<dyn std::any::Any + Send + Sync> {
+                Box::new(val.downcast_ref::<String>().unwrap().clone())
+            },
+            |val: &(dyn std::any::Any + Send + Sync)| -> Box<dyn std::any::Any + Send + Sync> {
+                Box::new(val.downcast_ref::<String>().unwrap().clone())
+            },
+        ],
+        gather_fn,
+    );
+
+    builder.connect(src, dispatch).unwrap();
+    builder.connect(dispatch, int_path).unwrap();
+    builder.connect(dispatch, str_path).unwrap();
+    builder.connect(int_path, join).unwrap();
+    builder.connect(str_path, join).unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(join).unwrap();
+
+    let dag = builder.build().unwrap();
+    let ctx = make_ctx();
+    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<(String, String)>().unwrap();
+    // src: (10, "n=5"), dispatch: [10, "n=5"], int_path: "i=10", str_path: "N=5"
+    assert_eq!(output.0, "i=10");
+    assert_eq!(output.1, "N=5");
 }

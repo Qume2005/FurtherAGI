@@ -1,27 +1,27 @@
 //! # DAG 构建器 — 节点添加
 //!
-//! 在 [`DagBuilder`](super::DagBuilder) 上实现节点添加方法。
+//! 在 [`DagBuilder`](DagBuilder) 上实现节点添加方法。
 //!
 //! ## 功能实现
 //!
-//! 本模块提供节点添加方法，覆盖所有 [`NodeKind`](super::NodeKind) 变体：
+//! 本模块提供节点添加方法，覆盖所有 [`NodeKind`](NodeKind) 变体：
 //!
 //! | 方法 | 节点类型 | 说明 |
 //! |------|----------|------|
-//! | [`add()`](super::DagBuilder::add) | `Workflow` | 从纯异步闭包创建 |
-//! | [`add_with_ctx()`](super::DagBuilder::add_with_ctx) | `Workflow` | 从需要 `ExecutionContext` 的闭包创建 |
-//! | [`add_workflow()`](super::DagBuilder::add_workflow) | `Workflow` | 添加预构建的 `ErasedWorkflow` |
-//! | [`add_erased()`](super::DagBuilder::add_erased) | `Workflow` | 同上，接受字符串 ID |
-//! | [`add_scatter_gather()`](super::DagBuilder::add_scatter_gather) | `Clone` | Scatter-gather 节点 |
-//! | [`add_connection()`](super::DagBuilder::add_connection) | `Connection` | 命名透传节点 |
-//! | [`add_conditional()`](super::DagBuilder::add_conditional) | `Conditional` | 条件分支节点（谓词必须输出 `bool`） |
-//! | [`add_loop()`](super::DagBuilder::add_loop) | `Loop` | 固定次数循环节点 |
+//! | [`add()`](DagBuilder::add) | `Workflow` | 从纯异步闭包创建 |
+//! | [`add_with_ctx()`](DagBuilder::add_with_ctx) | `Workflow` | 从需要 `ExecutionContext` 的闭包创建 |
+//! | [`add_workflow()`](DagBuilder::add_workflow) | `Workflow` | 添加预构建的 `ErasedWorkflow` |
+//! | [`add_erased()`](DagBuilder::add_erased) | `Workflow` | 同上，接受字符串 ID |
+//! | [`add_scatter_gather()`](DagBuilder::add_scatter_gather) | `Clone` | Scatter-gather 节点 |
+//! | [`add_connection()`](DagBuilder::add_connection) | `Connection` | 命名透传节点 |
+//! | [`add_conditional()`](DagBuilder::add_conditional) | `Conditional` | 条件分支节点（谓词必须输出 `bool`） |
+//! | [`add_loop()`](DagBuilder::add_loop) | `Loop` | 固定次数循环节点 |
 //!
-//! 每个方法分配新的 [`NodeId`](crate::workflow::model::NodeId) 并捕获类型信息。
+//! 每个方法分配新的 [`NodeId`](NodeId) 并捕获类型信息。
 //!
 //! ## 实现特色
 //!
-//! - 闭包到工作流自动转换：`add()` / `add_with_ctx()` 通过 [`from_fn`](crate::workflow::definition::from_fn)
+//! - 闭包到工作流自动转换：`add()` / `add_with_ctx()` 通过 [`from_fn`](from_fn)
 //!   将闭包包装为 `ErasedWorkflow`
 //! - `add_conditional()` 在添加时强制校验谓词输出类型为 `bool`，否则返回 `ValidationError`
 //! - `add_loop()` 从循环体入口/出口节点推断输入/输出类型
@@ -32,7 +32,7 @@
 //! | 类别 | 依赖 |
 //! |------|------|
 //! | 外部 crate | `std::future::Future` |
-//! | 内部模块 | [`crate::workflow::definition::from_fn`]、[`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::{ExecutionContext, NodeId, WorkflowId}`] |
+//! | 内部模块 | [`from_fn`]、[`WorkflowError`]、[`crate::workflow::model::{ExecutionContext, NodeId, WorkflowId}`] |
 //!
 //! ## 示例
 //!
@@ -74,7 +74,7 @@ use super::super::error::WorkflowError;
 use super::super::model::{ExecutionContext, NodeId, WorkflowId};
 use super::{
     CloneFn, DagBuilder, ErasedWorkflow, Node, NodeKind,
-    ProductJoinFn, SumMatchDestructFn, make_clone_fn,
+    ProductJoinFn, SumMatchDestructFn, ReshapeFn, DispatchFn, make_clone_fn,
 };
 
 impl DagBuilder {
@@ -92,6 +92,8 @@ impl DagBuilder {
             sum_match_fns: std::collections::HashMap::new(),
             product_join_fns: std::collections::HashMap::new(),
             product_join_input_clone_fns: std::collections::HashMap::new(),
+            reshape_fns: std::collections::HashMap::new(),
+            dispatch_fns: std::collections::HashMap::new(),
         }
     }
 
@@ -127,7 +129,7 @@ impl DagBuilder {
     /// Add a workflow node from a pure async closure (no context). Returns its `NodeId`.
     ///
     /// The closure takes only the input and returns a future. Use [`add_with_ctx`](Self::add_with_ctx)
-    /// if you need access to [`ExecutionContext`](ExecutionContext).
+    /// if you need access to [`ExecutionContext`].
     ///
     /// ID uses `"namespace@Name"` format; the name part becomes the workflow name.
     ///
@@ -155,7 +157,7 @@ impl DagBuilder {
         self.add_workflow(wid, from_fn(name, move |input: I, _ctx: &ExecutionContext| f(input)))
     }
 
-    /// Add a workflow node from an async closure that needs [`ExecutionContext`](ExecutionContext).
+    /// Add a workflow node from an async closure that needs [`ExecutionContext`].
     /// Returns its `NodeId`.
     ///
     /// Use this when the workflow needs access to the execution platform.
@@ -190,7 +192,7 @@ impl DagBuilder {
     /// Add a pre-built type-erased workflow node. Returns its `NodeId`.
     ///
     /// Use this when you have a `Box<dyn ErasedWorkflow>` from [`into_erased`](super::super::definition::into_erased)
-    /// or [`from_fn`](from_fn).
+    /// or [`from_fn`].
     pub fn add_erased(&mut self, id: &str, workflow: Box<dyn ErasedWorkflow>) -> NodeId {
         self.add_workflow(WorkflowId::from(id), workflow)
     }
@@ -423,6 +425,54 @@ impl DagBuilder {
                 workflow: None,
                 input_type: None,  // ProductJoin accepts heterogeneous inputs
                 output_type: Some(output_type),
+            },
+        );
+        node_id
+    }
+
+    /// Add a reshape node that restructures tuple nesting.
+    ///
+    /// Takes a single input and produces a single output via the provided function.
+    /// Input and output types are both `None` because the reshape function
+    /// may change the type structure (e.g., `(A, B, C)` → `(A, (B, C))`).
+    pub fn add_reshape(
+        &mut self,
+        reshape_fn: ReshapeFn,
+    ) -> NodeId {
+        let node_id = self.alloc_id();
+        self.reshape_fns.insert(node_id, reshape_fn);
+        self.nodes.insert(
+            node_id,
+            Node {
+                id: node_id,
+                kind: NodeKind::Reshape,
+                workflow: None,
+                input_type: None,
+                output_type: None,
+            },
+        );
+        node_id
+    }
+
+    /// Add a dispatch node that splits a product type into multiple outputs.
+    ///
+    /// The dispatch function receives the input tuple and returns a `Vec` of boxed values,
+    /// one per outgoing edge. The i-th element is routed to the i-th outgoing edge.
+    pub fn add_dispatch(
+        &mut self,
+        output_count: usize,
+        dispatch_fn: DispatchFn,
+    ) -> NodeId {
+        let node_id = self.alloc_id();
+        self.dispatch_fns.insert(node_id, dispatch_fn);
+        self.nodes.insert(
+            node_id,
+            Node {
+                id: node_id,
+                kind: NodeKind::Dispatch { output_count },
+                workflow: None,
+                input_type: None,
+                output_type: None,
             },
         );
         node_id

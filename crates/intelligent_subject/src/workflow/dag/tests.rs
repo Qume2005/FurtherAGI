@@ -204,3 +204,56 @@ fn connection_node() {
         assert_eq!(label, "after_add");
     }
 }
+
+#[test]
+fn reshape_node() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("src", |input: (i32, i32)| async move {
+        Ok::<(i32, (i32, i32)), WorkflowError>((input.0, input))
+    });
+    let reshape = builder.add_reshape(Box::new(|input| {
+        let (a, (b, c)) = *input.downcast_ref::<(i32, (i32, i32))>().unwrap();
+        Box::new(((a, b), c))
+    }));
+    let dst = builder.add("dst", |input: ((i32, i32), i32)| async move {
+        Ok::<i32, WorkflowError>(input.0 .0 + input.0 .1 + input.1)
+    });
+
+    builder.connect(src, reshape).unwrap();
+    builder.connect(reshape, dst).unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(dst).unwrap();
+
+    let dag = builder.build().unwrap();
+    assert_eq!(dag.topo_order().len(), 3);
+}
+
+#[test]
+fn dispatch_node() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("src", |input: i32| async move {
+        Ok::<(i32, i32), WorkflowError>((input, input * 2))
+    });
+    let dispatch = builder.add_dispatch(
+        2,
+        Box::new(|input| {
+            let (a, b) = *input.downcast_ref::<(i32, i32)>().unwrap();
+            vec![Box::new(a) as Box<dyn Any + Send + Sync>, Box::new(b)]
+        }),
+    );
+    let left = builder.add("left", |input: i32| async move {
+        Ok::<i32, WorkflowError>(input + 1)
+    });
+    let right = builder.add("right", |input: i32| async move {
+        Ok::<i32, WorkflowError>(input * 10)
+    });
+
+    builder.connect(src, dispatch).unwrap();
+    builder.connect(dispatch, left).unwrap();
+    builder.connect(dispatch, right).unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(left).unwrap();
+
+    let dag = builder.build().unwrap();
+    assert_eq!(dag.topo_order().len(), 4);
+}

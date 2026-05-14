@@ -17,7 +17,7 @@
 //! | 类别 | 依赖 |
 //! |------|------|
 //! | 外部 crate | `async-trait`（异步 trait） |
-//! | 内部模块 | [`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::ExecutionContext`] |
+//! | 内部模块 | [`WorkflowError`]、[`ExecutionContext`] |
 //!
 //! # 快速开始
 //!

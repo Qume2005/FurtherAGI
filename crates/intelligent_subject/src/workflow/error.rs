@@ -139,6 +139,18 @@ pub enum WorkflowError {
     /// 由需要外部执行环境的工作流（如 Docker 内运行 Python）产生。
     #[error("platform error: {0}")]
     Platform(#[from] PlatformError),
+
+    /// LLM 工具未找到。
+    #[error("tool not found: {0}")]
+    ToolNotFound(String),
+
+    /// 工具参数反序列化失败。
+    #[error("tool argument error for '{tool}': {message}")]
+    ToolArgumentError { tool: String, message: String },
+
+    /// 工具输出序列化失败。
+    #[error("tool output error for '{tool}': {message}")]
+    ToolOutputError { tool: String, message: String },
 }
 
 impl WorkflowError {

@@ -4,7 +4,7 @@
 //!
 //! ## 功能实现
 //!
-//! `LocalPlatform` 是 [`WorkPlatform`](super::WorkPlatform) 的本机实现，
+//! `LocalPlatform` 是 [`WorkPlatform`](WorkPlatform) 的本机实现，
 //! 通过 `tokio::process::Command` 执行系统命令，直接操作本机文件系统。
 //! 命令以宿主进程的相同权限运行，适用于开发环境和可信执行场景。
 //!
@@ -12,7 +12,7 @@
 //!
 //! - 通过 `tokio::process::Command` 实现异步命令执行，支持 stdout/stderr 管道捕获
 //! - `run_command` 支持通过 `env` 参数传递环境变量
-//! - 非零退出码触发 [`PlatformError::CommandFailed`](super::PlatformError::CommandFailed)，
+//! - 非零退出码触发 [`PlatformError::CommandFailed`](PlatformError::CommandFailed)，
 //!   包含退出码和 stderr 内容
 //! - 工作区根目录在构造时自动创建（`create_dir_all`）
 //! - `cleanup` 为空操作 — 本地平台不会删除其工作区

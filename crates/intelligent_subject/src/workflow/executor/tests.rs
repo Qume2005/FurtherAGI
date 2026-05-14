@@ -134,3 +134,63 @@ async fn sum_match_err_branch() {
     assert_eq!(*output, "err: failure");
 }
 
+#[tokio::test]
+async fn reshape_execution() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("src", |input: i32| async move {
+        Ok::<(i32, i32), WorkflowError>((input, input * 2))
+    });
+    let reshape = builder.add_reshape(Box::new(|input| {
+        let (a, b) = *input.downcast_ref::<(i32, i32)>().unwrap();
+        Box::new(((a, b), a + b))
+    }));
+    let dst = builder.add("dst", |input: ((i32, i32), i32)| async move {
+        Ok::<i32, WorkflowError>(input.0 .0 + input.0 .1 + input.1)
+    });
+
+    builder.connect(src, reshape).unwrap();
+    builder.connect(reshape, dst).unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(dst).unwrap();
+
+    let dag = builder.build().unwrap();
+    let ctx = make_ctx();
+    let result = Executor::execute(&dag, Box::new(3i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<i32>().unwrap();
+    // src: (3, 6), reshape: ((3, 6), 9), dst: 3+6+9=18
+    assert_eq!(*output, 18);
+}
+
+#[tokio::test]
+async fn dispatch_execution() {
+    let mut builder = DagBuilder::new();
+    let src = builder.add("src", |input: i32| async move {
+        Ok::<(i32, i32), WorkflowError>((input, input * 10))
+    });
+    let dispatch = builder.add_dispatch(
+        2,
+        Box::new(|input| {
+            let (a, b) = *input.downcast_ref::<(i32, i32)>().unwrap();
+            vec![Box::new(a) as Box<dyn Any + Send + Sync>, Box::new(b)]
+        }),
+    );
+    let left = builder.add("left", |input: i32| async move {
+        Ok::<i32, WorkflowError>(input + 1)
+    });
+    let right = builder.add("right", |input: i32| async move {
+        Ok::<i32, WorkflowError>(input * 2)
+    });
+
+    builder.connect(src, dispatch).unwrap();
+    builder.connect(dispatch, left).unwrap();
+    builder.connect(dispatch, right).unwrap();
+    builder.set_entry(src).unwrap();
+    builder.set_exit(right).unwrap();
+
+    let dag = builder.build().unwrap();
+    let ctx = make_ctx();
+    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await.unwrap();
+    let output = result.output.downcast_ref::<i32>().unwrap();
+    // src: (5, 50), dispatch: [5, 50], right: 50*2=100
+    assert_eq!(*output, 100);
+}

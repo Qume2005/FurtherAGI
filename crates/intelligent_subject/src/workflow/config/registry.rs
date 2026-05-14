@@ -8,21 +8,16 @@
 //! 类型名字符串（如 `"i32"`、`"String"`）解析为 `DagBuilder` 所需的 `TypeId` 和
 //! 广播节点克隆函数 `CloneFn`。
 //!
+//! 还支持注册工具类型的 serde 闭包，
+//! 用于 `<tool>` 元素的 JSON 参数反序列化和输出序列化。
+//!
 //! ## 实现特色
 //!
 //! - [`with_primitives()`](TypeRegistry::with_primitives) 预注册 14 种常见 Rust 类型：
 //!   `i8` ~ `i128`、`u8` ~ `u128`、`f32`、`f64`、`bool`、`String`
-//! - `register::<T>()` 自动捕获 `TypeId::of::<T>()` 和 `make_clone_fn::<T>()`，
-//!   用户只需指定类型参数和名字
+//! - `register::<T>()` 自动捕获 `TypeId::of::<T>()` 和 `make_clone_fn::<T>()`
+//! - `register_tool_type::<T>()` 额外捕获 serde 闭包（用于 `<tool>` 元素）
 //! - `get()` 返回 `(TypeId, CloneFn)` 元组，供 `DagBuilder` 直接使用
-//! - 内部使用 `TypeInfo` 结构体封装存储细节，公共 API 简洁
-//!
-//! ## 依赖
-//!
-//! | 类别 | 依赖 |
-//! |------|------|
-//! | 外部 crate | 无 |
-//! | 内部模块 | [`crate::workflow::dag::{CloneFn, make_clone_fn}`] |
 //!
 //! ## 示例
 //!
@@ -38,29 +33,25 @@
 //! let (id, clone_fn) = types.get("i32").unwrap();
 //! assert_eq!(id, std::any::TypeId::of::<i32>());
 //! ```
-//!
-//! **预注册基础类型 + 自定义类型：**
-//!
-//! ```rust
-//! use intelligent_subject::workflow::config::TypeRegistry;
-//!
-//! let mut types = TypeRegistry::with_primitives();
-//! // 自定义类型
-//! types.register::<Vec<String>>("VecString");
-//!
-//! assert!(types.get("i32").is_some());
-//! assert!(types.get("VecString").is_some());
-//! assert!(types.get("MyCustomType").is_none());
-//! ```
 
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::workflow::dag::{CloneFn, make_clone_fn};
+use crate::workflow::error::WorkflowError;
+
+type BoxedValue = Box<dyn std::any::Any + Send + Sync>;
+
+type DeserializeFn = Arc<dyn Fn(&str) -> Result<BoxedValue, WorkflowError> + Send + Sync>;
+
+type SerializeFn = Arc<dyn Fn(&BoxedValue) -> Result<String, WorkflowError> + Send + Sync>;
 
 struct TypeInfo {
     type_id: TypeId,
     clone_fn: CloneFn,
+    deserialize_fn: Option<DeserializeFn>,
+    serialize_fn: Option<SerializeFn>,
 }
 
 /// Registry mapping string type names to their `TypeId` and clone function.
@@ -120,6 +111,60 @@ impl TypeRegistry {
         let info = TypeInfo {
             type_id: TypeId::of::<T>(),
             clone_fn: make_clone_fn::<T>(),
+            deserialize_fn: None,
+            serialize_fn: None,
+        };
+        self.types.insert(name.into(), info);
+    }
+
+    /// Register a type for tool use, including serde closures.
+    ///
+    /// In addition to `Clone`, `T` must implement `DeserializeOwned` and `Serialize`.
+    /// Required for types used as tool input/output in XML `<tool>` elements.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use intelligent_subject::workflow::config::TypeRegistry;
+    ///
+    /// let mut types = TypeRegistry::new();
+    /// types.register_tool_type::<serde_json::Value>("JsonValue");
+    /// ```
+    pub fn register_tool_type<T>(&mut self, name: impl Into<String>)
+    where
+        T: Clone + serde::de::DeserializeOwned + serde::Serialize + Send + Sync + 'static,
+    {
+        let deserialize: DeserializeFn = Arc::new(|json_str: &str| {
+            serde_json::from_str::<T>(json_str)
+                .map(|v| Box::new(v) as BoxedValue)
+                .map_err(|e| {
+                    WorkflowError::ValidationError(format!(
+                        "tool type deserialization failed for '{}': {e}",
+                        std::any::type_name::<T>()
+                    ))
+                })
+        });
+
+        let serialize: SerializeFn = Arc::new(|output: &BoxedValue| {
+            output
+                .downcast_ref::<T>()
+                .ok_or_else(|| {
+                    WorkflowError::ValidationError("tool type output downcast failed".into())
+                })
+                .and_then(|v| {
+                    serde_json::to_string(v).map_err(|e| {
+                        WorkflowError::ValidationError(format!(
+                            "tool type serialization failed: {e}"
+                        ))
+                    })
+                })
+        });
+
+        let info = TypeInfo {
+            type_id: TypeId::of::<T>(),
+            clone_fn: make_clone_fn::<T>(),
+            deserialize_fn: Some(deserialize),
+            serialize_fn: Some(serialize),
         };
         self.types.insert(name.into(), info);
     }
@@ -129,6 +174,22 @@ impl TypeRegistry {
     /// Returns `(TypeId, CloneFn)` if found, `None` otherwise.
     pub fn get(&self, name: &str) -> Option<(TypeId, CloneFn)> {
         self.types.get(name).map(|info| (info.type_id, info.clone_fn))
+    }
+
+    /// Look up serde closures for a tool type by name.
+    ///
+    /// Returns `(DeserializeFn, SerializeFn)` if the type was registered via
+    /// [`register_tool_type`](Self::register_tool_type), `None` otherwise.
+    pub fn get_serde(
+        &self,
+        name: &str,
+    ) -> Option<(&DeserializeFn, &SerializeFn)> {
+        self.types.get(name).and_then(|info| {
+            match (&info.deserialize_fn, &info.serialize_fn) {
+                (Some(d), Some(s)) => Some((d, s)),
+                _ => None,
+            }
+        })
     }
 }
 

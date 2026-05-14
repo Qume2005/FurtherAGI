@@ -1,7 +1,7 @@
 //! # 逻辑判断 Builtin Workflow
 //!
-//! 条件判断和逻辑运算工作流，内部使用 [`MapFn`](crate::workflow::services::MapFn)
-//! 和 [`PredicateFn`](crate::workflow::services::PredicateFn) 服务。
+//! 条件判断和逻辑运算工作流，内部使用 [`MapFn`]
+//! 和 [`PredicateFn`] 服务。
 
 use async_trait::async_trait;
 

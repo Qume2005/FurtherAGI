@@ -7,7 +7,7 @@
 //! 本模块实现工作流 DAG 的数据模型和流式构建器：
 //!
 //! - **[`NodeKind`]** — 节点类型枚举，涵盖所有组合模式：
-//!   `Workflow`、`Clone`、`Loop`、`Conditional`、`SubWorkflow`、`Connection`、`SumMatch`、`ProductJoin`
+//!   `Workflow`、`Clone`、`Loop`、`Conditional`、`SubWorkflow`、`Connection`、`SumMatch`、`ProductJoin`、`Reshape`、`Dispatch`
 //! - **[`Node`]** — DAG 节点，包含 `NodeKind`、类型擦除工作流和输入/输出 `TypeId`
 //! - **[`Edge`]** — 有向边，可选标签（用于条件分支 `"true"` / `"false"` 或或类型 `"ok"` / `"err"`）
 //! - **[`WorkflowDag`]** — 构建完成的不可变 DAG，包含缓存的拓扑排序
@@ -20,9 +20,9 @@
 //!
 //! ## 和类型与或类型
 //!
-//! - **[`ProductJoin`]**(`NodeKind::ProductJoin`) — 和类型合并：收集多个上游值，
+//! - **ProductJoin**(`NodeKind::ProductJoin`) — 和类型合并：收集多个上游值，
 //!   通过 [`ProductJoinFn`] 合并为 `(A, B, ...)` 元组输出
-//! - **[`SumMatch`]**(`NodeKind::SumMatch`) — 或类型拆解：接收 `T | E`（`Result<T, E>`），
+//! - **SumMatch**(`NodeKind::SumMatch`) — 或类型拆解：接收 `T | E`（`Result<T, E>`），
 //!   路由到 `"ok"` 边（传递 T）或 `"err"` 边（传递 E）
 //!
 //! ## 依赖
@@ -30,7 +30,7 @@
 //! | 类别 | 依赖 |
 //! |------|------|
 //! | 外部 crate | `strum_macros`（Display 派生） |
-//! | 内部模块 | [`crate::workflow::definition::ErasedWorkflow`]、[`NodeId`]、[`WorkflowId`] |
+//! | 内部模块 | [`ErasedWorkflow`]、[`NodeId`]、[`WorkflowId`] |
 //!
 //! ## Core types
 //!
@@ -103,6 +103,22 @@ pub type ProductJoinFn = Box<
     dyn Fn(Vec<Box<dyn Any + Send + Sync>>) -> Box<dyn Any + Send + Sync> + Send + Sync,
 >;
 
+/// Type-erased function that restructures a single value.
+///
+/// Used by Reshape nodes to change tuple nesting without altering values
+/// (e.g., `(A, B, C)` → `(A, (B, C))`).
+pub type ReshapeFn = Box<
+    dyn Fn(Box<dyn Any + Send + Sync>) -> Box<dyn Any + Send + Sync> + Send + Sync,
+>;
+
+/// Type-erased function that splits a single value into multiple values.
+///
+/// Used by Dispatch nodes to unpack a product type into N separate outputs,
+/// one per outgoing edge (in order). The i-th element goes to the i-th edge.
+pub type DispatchFn = Box<
+    dyn Fn(Box<dyn Any + Send + Sync>) -> Vec<Box<dyn Any + Send + Sync>> + Send + Sync,
+>;
+
 /// The kind of a node in the workflow DAG.
 #[derive(Debug, Clone, Display)]
 pub enum NodeKind {
@@ -141,6 +157,14 @@ pub enum NodeKind {
     /// Product-type join: collects outputs from multiple upstream nodes into `(A, B, ...)`.
     #[strum(serialize = "product_join")]
     ProductJoin { input_count: usize },
+    /// Tuple restructuring: reshapes tuple nesting (e.g., `(A, B, C)` → `(A, (B, C))`).
+    /// Single input, single output.
+    #[strum(serialize = "reshape")]
+    Reshape,
+    /// Product-type dispatch: splits a tuple into N separate values,
+    /// one per outgoing edge (in order). The inverse of ProductJoin.
+    #[strum(serialize = "dispatch")]
+    Dispatch { output_count: usize },
 }
 
 /// A node in the workflow DAG.
@@ -148,7 +172,7 @@ pub struct Node {
     pub id: NodeId,
     pub kind: NodeKind,
     /// The erased workflow to execute.
-    /// `None` for structural nodes (Clone, SumMatch, ProductJoin, Connection)
+    /// `None` for structural nodes (Clone, SumMatch, ProductJoin, Reshape, Dispatch, Connection)
     /// or unresolved SubWorkflow nodes.
     pub workflow: Option<Box<dyn ErasedWorkflow>>,
     /// The TypeId this node expects as input.
@@ -186,6 +210,10 @@ pub struct DagBuilder {
     product_join_fns: HashMap<NodeId, ProductJoinFn>,
     /// Clone functions for ProductJoin input values (per node, ordered by edge).
     product_join_input_clone_fns: HashMap<NodeId, Vec<CloneFn>>,
+    /// Reshape functions for Reshape nodes.
+    reshape_fns: HashMap<NodeId, ReshapeFn>,
+    /// Dispatch functions for Dispatch nodes.
+    dispatch_fns: HashMap<NodeId, DispatchFn>,
 }
 
 impl Default for DagBuilder {

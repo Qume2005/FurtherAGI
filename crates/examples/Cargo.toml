@@ -39,7 +39,25 @@ path = "src/bin/workflow/docker_python.rs"
 name = "workflow_state_node"
 path = "src/bin/workflow/state_node.rs"
 
+[[bin]]
+name = "workflow_dispatch"
+path = "src/bin/workflow/dispatch.rs"
+
+[[bin]]
+name = "workflow_reshape"
+path = "src/bin/workflow/reshape.rs"
+
+[[bin]]
+name = "workflow_http"
+path = "src/bin/workflow/http.rs"
+
+[[bin]]
+name = "workflow_llm"
+path = "src/bin/workflow/llm.rs"
+
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 intelligent_subject = { path = "../intelligent_subject" }
+serde_json = "1"
 tokio = { version = "1", features = ["full"] }

@@ -66,10 +66,85 @@ pub enum ChatRole {
 }
 
 /// 聊天消息。
+///
+/// 支持 LLM 工具调用的完整消息格式：
+/// - 普通消息：仅 `role` + `content`
+/// - 助手工具调用：`role: Assistant` + `content` + `tool_calls`
+/// - 工具结果：`role: Tool` + `content` + `tool_call_id` + `name`
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: String,
+    /// 助手消息中的工具调用（LLM 发起）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    /// 工具结果消息对应的工具调用 ID。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    /// 工具结果消息对应的工具名称。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl ChatMessage {
+    /// 创建用户消息。
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::User,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    /// 创建系统消息。
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::System,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    /// 创建助手消息。
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::Assistant,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    /// 创建带工具调用的助手消息。
+    pub fn assistant_with_tool_calls(content: String, tool_calls: Vec<ToolCall>) -> Self {
+        Self {
+            role: ChatRole::Assistant,
+            content,
+            tool_calls: Some(tool_calls),
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    /// 创建工具结果消息。
+    pub fn tool_result(
+        tool_call_id: impl Into<String>,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        Self {
+            role: ChatRole::Tool,
+            content: content.into(),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
+            name: Some(name.into()),
+        }
+    }
 }
 
 /// LLM 请求。

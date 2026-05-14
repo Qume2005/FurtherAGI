@@ -29,7 +29,7 @@
 //! | 类别 | 依赖 |
 //! |------|------|
 //! | 外部 crate | `dashmap`（并发 HashMap）、`tracing`（instrument） |
-//! | 内部模块 | [`crate::workflow::dag::WorkflowDag`]、[`crate::workflow::definition::ErasedWorkflow`]、[`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::{ExecutionContext, NodeId, WorkflowId}`] |
+//! | 内部模块 | [`WorkflowDag`]、[`ErasedWorkflow`]、[`crate::workflow::error::WorkflowError`]、[`crate::workflow::model::{ExecutionContext, NodeId, WorkflowId}`] |
 //!
 //! ## 示例
 //!

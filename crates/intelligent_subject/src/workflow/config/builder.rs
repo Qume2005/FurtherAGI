@@ -1,22 +1,25 @@
 //! # XML 配置驱动 DAG 构建器
 //!
-//! 从 XML 配置构建 [`WorkflowDag`](crate::workflow::dag::WorkflowDag)，
-//! 使用 [`TypeRegistry`](super::TypeRegistry) 解析类型名，
-//! 使用 [`WorkflowFactoryRegistry`](super::WorkflowFactoryRegistry) 实例化工作流。
+//! 从 XML 配置构建 [`WorkflowDag`](WorkflowDag)，
+//! 使用 [`TypeRegistry`](TypeRegistry) 解析类型名，
+//! 使用 [`WorkflowFactoryRegistry`](WorkflowFactoryRegistry) 实例化工作流。
 //!
 //! ## 功能实现
 //!
 //! [`ConfigBuilder`] 通过 serde + quick-xml 反序列化 XML 配置，
-//! 然后通过三遍构建流程将 XML 元素转化为 DAG：
+//! 然后通过四遍构建流程将 XML 元素转化为 DAG：
 //!
-//! 1. **第一遍** — 添加独立节点（`<node>`、`<clone>`、`<connection>`、`<conditional>`、`<sub-workflow>`）
-//! 2. **第二遍** — 添加前向引用节点（`<loop>`）
-//! 3. **第三遍** — 添加 `<connect>` 边
+//! 1. **Pass 1.5** — 展开 `<node>` 和 `<connect>` 上的结构性属性为合成节点
+//!    （dispatch、sum-match、join、reshape、connection 属性）
+//! 2. **Pass 1** — 添加独立节点（`<node>`、`<clone>`、`<conditional>` 等）
+//! 3. **Pass 2** — 添加前向引用节点（`<loop>`）
+//! 4. **Pass 3** — 添加边（含重写后的合成边）
 //!
 //! ## 实现特色
 //!
 //! - 使用 serde 反序列化 XML，`@` 前缀映射属性名
 //! - 通过 `$value` + 枚举支持交错排列的异构子元素
+//! - 属性语法由 [`expand_attributes`](ConfigBuilder::expand_attributes) 展开为合成节点
 //! - 三遍构建策略解决前向引用问题
 //! - `build_from_str()` 直接解析 XML 字符串，`build_from_file()` 从文件读取
 //!
@@ -55,8 +58,8 @@
 //!       <node name="b" implementation="add_one"/>
 //!       <connect from="a" to="b"/>
 //!     </workflow>"#;
-//! let (id, dag) = builder.build_from_str(xml).unwrap();
-//! assert_eq!(id.as_str(), "pipeline");
+//! let output = builder.build_from_str(xml).unwrap();
+//! assert_eq!(output.id.as_str(), "pipeline");
 //! ```
 
 use std::any::{Any, TypeId};
@@ -114,6 +117,12 @@ enum ChildXml {
     SumMatch(SumMatchXml),
     #[serde(rename = "product-join")]
     ProductJoin(ProductJoinXml),
+    #[serde(rename = "reshape")]
+    Reshape(ReshapeXml),
+    #[serde(rename = "dispatch")]
+    Dispatch(DispatchXml),
+    #[serde(rename = "tool")]
+    Tool(ToolXml),
     #[serde(rename = "connect")]
     Connect(ConnectXml),
 }
@@ -124,6 +133,18 @@ struct NodeXml {
     name: String,
     #[serde(rename = "@implementation")]
     implementation: String,
+    /// Dispatch 属性：已注册的 dispatch 函数名。
+    #[serde(rename = "@dispatch")]
+    dispatch: Option<String>,
+    /// Dispatch 属性：输出数量。
+    #[serde(rename = "@dispatch-count")]
+    dispatch_count: Option<usize>,
+    /// SumMatch 属性：格式 `"OkType/ErrType"`。
+    #[serde(rename = "@sum-match")]
+    sum_match: Option<String>,
+    /// ProductJoin 属性：已注册的 join 函数名。
+    #[serde(rename = "@join")]
+    join: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -217,6 +238,24 @@ struct ProductJoinXml {
 }
 
 #[derive(Deserialize)]
+struct ReshapeXml {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "@reshape")]
+    reshape_name: String,
+}
+
+#[derive(Deserialize)]
+struct DispatchXml {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "@output-count")]
+    output_count: usize,
+    #[serde(rename = "@dispatch")]
+    dispatch_name: String,
+}
+
+#[derive(Deserialize)]
 struct ConnectXml {
     #[serde(rename = "@from")]
     from: String,
@@ -224,17 +263,46 @@ struct ConnectXml {
     to: String,
     #[serde(rename = "@label")]
     label: Option<String>,
+    /// Connection 属性：透传值的类型名。
+    #[serde(rename = "@type")]
+    type_name: Option<String>,
+    /// Reshape 属性：已注册的 reshape 函数名。
+    #[serde(rename = "@reshape")]
+    reshape: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ToolXml {
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(rename = "@description")]
+    description: String,
+    #[serde(rename = "@implementation")]
+    implementation: String,
+    #[serde(rename = "@input-type")]
+    input_type: String,
+    #[serde(rename = "@output-type")]
+    output_type: String,
+    #[serde(rename = "@parameters")]
+    parameters: String,
 }
 
 impl From<WorkflowXml> for WorkflowConfig {
     fn from(xml: WorkflowXml) -> Self {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
+        let mut tools = Vec::new();
 
         for child in xml.children {
             match child {
                 ChildXml::Node(n) => {
-                    nodes.push((n.name, NodeConfig::Workflow { implementation: n.implementation }));
+                    nodes.push((n.name, NodeConfig::Workflow {
+                        implementation: n.implementation,
+                        dispatch_name: n.dispatch,
+                        dispatch_count: n.dispatch_count,
+                        sum_match: n.sum_match,
+                        join_name: n.join,
+                    }));
                 }
                 ChildXml::Clone(n) => {
                     let branches: Vec<String> = n.children.into_iter()
@@ -282,11 +350,36 @@ impl From<WorkflowXml> for WorkflowConfig {
                         join_name: n.join_name,
                     }));
                 }
+                ChildXml::Reshape(n) => {
+                    nodes.push((n.name, NodeConfig::Reshape {
+                        reshape_name: n.reshape_name,
+                    }));
+                }
+                ChildXml::Dispatch(n) => {
+                    nodes.push((n.name, NodeConfig::Dispatch {
+                        output_count: n.output_count,
+                        dispatch_name: n.dispatch_name,
+                    }));
+                }
                 ChildXml::Connect(c) => {
                     edges.push(EdgeConfig {
                         from: c.from,
                         to: c.to,
                         label: c.label,
+                        type_name: c.type_name,
+                        reshape_name: c.reshape,
+                    });
+                }
+                ChildXml::Tool(t) => {
+                    let parameters: serde_json::Value = serde_json::from_str(&t.parameters)
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                    tools.push(super::schema::ToolConfig {
+                        name: t.name,
+                        description: t.description,
+                        implementation: t.implementation,
+                        input_type: t.input_type,
+                        output_type: t.output_type,
+                        parameters,
                     });
                 }
             }
@@ -296,6 +389,7 @@ impl From<WorkflowXml> for WorkflowConfig {
             workflow: WorkflowMeta { name: xml.name, entry: xml.entry, exit: xml.exit },
             nodes,
             edges,
+            tools,
         }
     }
 }
@@ -320,6 +414,17 @@ struct ProductJoinFactory {
 struct CloneGatherFactory {
     output_type: TypeId,
     gather_fn: Arc<dyn Fn(Vec<Box<dyn Any + Send + Sync>>) -> Box<dyn Any + Send + Sync> + Send + Sync>,
+}
+
+/// Reshape 工厂：将注册名映射到 reshape 函数。
+struct ReshapeFactory {
+    reshape_fn: Arc<dyn Fn(Box<dyn Any + Send + Sync>) -> Box<dyn Any + Send + Sync> + Send + Sync>,
+}
+
+/// Dispatch 工厂：将注册名映射到 dispatch 函数。
+struct DispatchFactory {
+    output_count: usize,
+    dispatch_fn: Arc<dyn Fn(Box<dyn Any + Send + Sync>) -> Vec<Box<dyn Any + Send + Sync>> + Send + Sync>,
 }
 
 /// 从 XML 配置构建 [`WorkflowDag`]。
@@ -350,12 +455,12 @@ struct CloneGatherFactory {
 /// wfs.register("double", || into_erased(Double));
 ///
 /// let builder = ConfigBuilder::new(types, wfs);
-/// let (id, dag) = builder.build_from_str(r#"
+/// let output = builder.build_from_str(r#"
 ///     <workflow name="test" entry="a" exit="a">
 ///       <node name="a" implementation="double"/>
 ///     </workflow>"#).unwrap();
-/// assert_eq!(id.as_str(), "test");
-/// assert_eq!(dag.topo_order().len(), 1);
+/// assert_eq!(output.id.as_str(), "test");
+/// assert_eq!(output.dag.topo_order().len(), 1);
 /// ```
 pub struct ConfigBuilder {
     types: TypeRegistry,
@@ -363,6 +468,8 @@ pub struct ConfigBuilder {
     sum_match_factories: HashMap<(String, String), SumMatchFactory>,
     product_join_factories: HashMap<String, ProductJoinFactory>,
     clone_gather_factories: HashMap<String, CloneGatherFactory>,
+    reshape_factories: HashMap<String, ReshapeFactory>,
+    dispatch_factories: HashMap<String, DispatchFactory>,
 }
 
 impl ConfigBuilder {
@@ -374,6 +481,8 @@ impl ConfigBuilder {
             sum_match_factories: HashMap::new(),
             product_join_factories: HashMap::new(),
             clone_gather_factories: HashMap::new(),
+            reshape_factories: HashMap::new(),
+            dispatch_factories: HashMap::new(),
         }
     }
 
@@ -438,19 +547,63 @@ impl ConfigBuilder {
         );
     }
 
+    /// Register a reshape factory by name.
+    ///
+    /// After registration, `<reshape reshape="..."/>` with matching name
+    /// will use this factory to create the reshape function.
+    pub fn register_reshape(
+        &mut self,
+        name: impl Into<String>,
+        reshape_fn: crate::workflow::dag::ReshapeFn,
+    ) {
+        self.reshape_factories.insert(
+            name.into(),
+            ReshapeFactory {
+                reshape_fn: Arc::from(reshape_fn),
+            },
+        );
+    }
+
+    /// Register a dispatch factory by name.
+    ///
+    /// After registration, `<dispatch dispatch="..."/>` with matching name
+    /// will use this factory to create the dispatch function.
+    pub fn register_dispatch(
+        &mut self,
+        name: impl Into<String>,
+        output_count: usize,
+        dispatch_fn: crate::workflow::dag::DispatchFn,
+    ) {
+        self.dispatch_factories.insert(
+            name.into(),
+            DispatchFactory {
+                output_count,
+                dispatch_fn: Arc::from(dispatch_fn),
+            },
+        );
+    }
+
     /// Build a `WorkflowDag` from a parsed [`WorkflowConfig`].
-    pub fn build(&self, config: WorkflowConfig) -> Result<(WorkflowId, WorkflowDag), ConfigBuildError> {
+    pub fn build(&self, config: WorkflowConfig) -> Result<BuildOutput, ConfigBuildError> {
         let workflow_id = WorkflowId::from(&config.workflow.name);
         let mut dag_builder = DagBuilder::new();
         let mut name_map: HashMap<String, NodeId> = HashMap::new();
+
+        // ── Pass 1.5: Expand attribute-based structural ops into synthetic nodes ──
+        //
+        // For <node> with dispatch/sum-match/join attributes, or <connect> with
+        // reshape/type attributes, we expand them into additional NodeConfig / EdgeConfig
+        // entries so that Pass 2+ can treat everything uniformly.
+
+        let (expanded_nodes, expanded_edges) = Self::expand_attributes(config.nodes, config.edges)?;
 
         // Deferred nodes that reference other nodes by name.
         let mut deferred_loops: Vec<(String, usize, String, String)> = Vec::new();
 
         // Pass 1: Add all nodes that don't reference other nodes.
-        for (name, node_cfg) in &config.nodes {
+        for (name, node_cfg) in &expanded_nodes {
             let node_id = match node_cfg {
-                NodeConfig::Workflow { implementation } => {
+                NodeConfig::Workflow { implementation, dispatch_name: _, dispatch_count: _, sum_match: _, join_name: _ } => {
                     let wf = self.workflows.create(implementation).ok_or_else(|| {
                         ConfigBuildError::UnknownWorkflow {
                             node: name.clone(),
@@ -576,6 +729,29 @@ impl ConfigBuilder {
                         Box::new(move |inputs| join_fn(inputs)),
                     )
                 }
+                NodeConfig::Reshape { reshape_name } => {
+                    let factory = self.reshape_factories.get(reshape_name).ok_or_else(|| {
+                        ConfigBuildError::UnknownReshape {
+                            node: name.clone(),
+                            name: reshape_name.clone(),
+                        }
+                    })?;
+                    let reshape_fn = factory.reshape_fn.clone();
+                    dag_builder.add_reshape(Box::new(move |input| reshape_fn(input)))
+                }
+                NodeConfig::Dispatch { output_count: _, dispatch_name } => {
+                    let factory = self.dispatch_factories.get(dispatch_name).ok_or_else(|| {
+                        ConfigBuildError::UnknownDispatch {
+                            node: name.clone(),
+                            name: dispatch_name.clone(),
+                        }
+                    })?;
+                    let dispatch_fn = factory.dispatch_fn.clone();
+                    dag_builder.add_dispatch(
+                        factory.output_count,
+                        Box::new(move |input| dispatch_fn(input)),
+                    )
+                }
             };
             name_map.insert(name.clone(), node_id);
         }
@@ -593,7 +769,7 @@ impl ConfigBuilder {
         }
 
         // Pass 3: Add edges.
-        for EdgeConfig { from, to, label } in &config.edges {
+        for EdgeConfig { from, to, label, type_name: _, reshape_name: _ } in &expanded_edges {
             let from_id = name_map.get(from).copied().ok_or_else(|| {
                 ConfigBuildError::UnknownNode(from.clone())
             })?;
@@ -619,11 +795,340 @@ impl ConfigBuilder {
 
         // Build (performs cycle detection).
         let dag = dag_builder.build()?;
-        Ok((workflow_id, dag))
+
+        // ── Process <tool> elements (LLM tools) ──
+        let tool_registry = self.build_tools(&config.tools)?;
+
+        Ok(BuildOutput {
+            id: workflow_id,
+            dag,
+            tools: tool_registry,
+        })
     }
 
+    /// Build tool entries from XML `<tool>` elements.
+    fn build_tools(
+        &self,
+        tool_configs: &[super::schema::ToolConfig],
+    ) -> Result<crate::workflow::tool_registry::ToolRegistry, ConfigBuildError> {
+        use crate::workflow::tool_registry::ToolEntry;
+        use crate::workflow::services::llm::ToolDefinition;
+
+        let registry = crate::workflow::tool_registry::ToolRegistry::new();
+
+        for tc in tool_configs {
+            // Create workflow instance from factory.
+            let workflow = self.workflows.create(&tc.implementation).ok_or_else(|| {
+                ConfigBuildError::UnknownWorkflow {
+                    node: tc.name.clone(),
+                    name: tc.implementation.clone(),
+                }
+            })?;
+
+            // Get serde closures from TypeRegistry.
+            let (deserialize_ref, _) = self.types.get_serde(&tc.input_type).ok_or_else(|| {
+                ConfigBuildError::UnknownType {
+                    node: tc.name.clone(),
+                    name: format!(
+                        "{} (tool input — use register_tool_type)",
+                        tc.input_type
+                    ),
+                }
+            })?;
+
+            let (_, serialize_ref) = self.types.get_serde(&tc.output_type).ok_or_else(|| {
+                ConfigBuildError::UnknownType {
+                    node: tc.name.clone(),
+                    name: format!(
+                        "{} (tool output — use register_tool_type)",
+                        tc.output_type
+                    ),
+                }
+            })?;
+
+            // Wrap Arc closures in Box for ToolEntry compatibility.
+            let deserialize_owned = {
+                let arc = deserialize_ref.clone();
+                Box::new(move |s: &str| arc(s))
+                    as Box<dyn Fn(&str) -> Result<Box<dyn std::any::Any + Send + Sync>, crate::workflow::error::WorkflowError> + Send + Sync>
+            };
+            let serialize_owned = {
+                let arc = serialize_ref.clone();
+                Box::new(move |v: &Box<dyn std::any::Any + Send + Sync>| arc(v))
+                    as Box<dyn Fn(&Box<dyn std::any::Any + Send + Sync>) -> Result<String, crate::workflow::error::WorkflowError> + Send + Sync>
+            };
+
+            let tool_def = ToolDefinition {
+                name: tc.name.clone(),
+                description: tc.description.clone(),
+                parameters: tc.parameters.clone(),
+            };
+
+            let entry = ToolEntry {
+                tool_def,
+                workflow,
+                deserialize: deserialize_owned,
+                serialize_output: serialize_owned,
+            };
+
+            registry.register(entry).map_err(ConfigBuildError::DagError)?;
+        }
+
+        Ok(registry)
+    }
+
+    /// Pass 1.5: Expand structural attributes on `<node>` and `<connect>` into
+    /// synthetic `NodeConfig` / `EdgeConfig` entries.
+    ///
+    /// This allows structural operations (Dispatch, SumMatch, ProductJoin, Reshape,
+    /// Connection) to be expressed as attributes while internally converting them
+    /// to the same standalone `NodeConfig` variants that the old XML elements use.
+    fn expand_attributes(
+        nodes: Vec<(String, NodeConfig)>,
+        edges: Vec<EdgeConfig>,
+    ) -> Result<(Vec<(String, NodeConfig)>, Vec<EdgeConfig>), ConfigBuildError> {
+        let mut out_nodes: Vec<(String, NodeConfig)> = Vec::new();
+        let mut out_edges: Vec<EdgeConfig> = Vec::new();
+
+        // Track which original node names get a post-dispatch or post-summatch,
+        // so we can rewrite edges: original → synthetic instead of original → downstream.
+        // Maps original_name → synthetic_dispatch_name (if dispatch attr present)
+        let mut dispatch_rewrite: HashMap<String, String> = HashMap::new();
+        // Maps original_name → synthetic_summatch_name (if sum-match attr present)
+        let mut summatch_rewrite: HashMap<String, String> = HashMap::new();
+        // Maps target_name → synthetic_join_name (if join attr present on a node pointing at this one)
+        // This is trickier: join is on the TARGET node, meaning "insert a ProductJoin BEFORE me"
+        // We rewrite edges: upstream → __join instead of upstream → target, and __join → target.
+        let mut join_rewrite: HashMap<String, String> = HashMap::new();
+
+        // Process nodes.
+        for (name, cfg) in nodes {
+            match &cfg {
+                NodeConfig::Workflow {
+                    implementation: _,
+                    dispatch_name: Some(dn),
+                    dispatch_count: Some(dc),
+                    sum_match: _,
+                    join_name: _,
+                } => {
+                    // Insert original workflow node (without the structural attrs).
+                    out_nodes.push((name.clone(), NodeConfig::Workflow {
+                        implementation: match &cfg {
+                            NodeConfig::Workflow { implementation, .. } => implementation.clone(),
+                            _ => unreachable!(),
+                        },
+                        dispatch_name: None,
+                        dispatch_count: None,
+                        sum_match: None,
+                        join_name: None,
+                    }));
+                    // Insert synthetic dispatch node.
+                    let synth = format!("__dispatch_{name}");
+                    out_nodes.push((synth.clone(), NodeConfig::Dispatch {
+                        output_count: *dc,
+                        dispatch_name: dn.clone(),
+                    }));
+                    dispatch_rewrite.insert(name.clone(), synth.clone());
+                    // Add connecting edge: original → synthetic
+                    out_edges.push(EdgeConfig {
+                        from: name.clone(),
+                        to: synth,
+                        label: None,
+                        type_name: None,
+                        reshape_name: None,
+                    });
+                }
+                NodeConfig::Workflow {
+                    implementation: _,
+                    dispatch_name: Some(_),
+                    dispatch_count: None,
+                    sum_match: _,
+                    join_name: _,
+                } => {
+                    // dispatch without dispatch-count: invalid.
+                    return Err(ConfigBuildError::MissingDispatchCount { node: name });
+                }
+                NodeConfig::Workflow {
+                    implementation: _,
+                    dispatch_name: None,
+                    dispatch_count: None,
+                    sum_match: Some(sm),
+                    join_name: _,
+                } => {
+                    // Insert original workflow node.
+                    out_nodes.push((name.clone(), NodeConfig::Workflow {
+                        implementation: match &cfg {
+                            NodeConfig::Workflow { implementation, .. } => implementation.clone(),
+                            _ => unreachable!(),
+                        },
+                        dispatch_name: None,
+                        dispatch_count: None,
+                        sum_match: None,
+                        join_name: None,
+                    }));
+                    // Insert synthetic sum-match node.
+                    let synth = format!("__summatch_{name}");
+                    let parts: Vec<&str> = sm.split('/').collect();
+                    if parts.len() == 2 {
+                        out_nodes.push((synth.clone(), NodeConfig::SumMatch {
+                            ok_type_name: parts[0].to_string(),
+                            err_type_name: parts[1].to_string(),
+                        }));
+                        summatch_rewrite.insert(name.clone(), synth.clone());
+                        // Add connecting edge: original → synthetic
+                        out_edges.push(EdgeConfig {
+                            from: name.clone(),
+                            to: synth,
+                            label: None,
+                            type_name: None,
+                            reshape_name: None,
+                        });
+                    } else {
+                        // Invalid format, pass through for error reporting.
+                        out_nodes.push((name, cfg));
+                    }
+                }
+                NodeConfig::Workflow {
+                    implementation: _,
+                    dispatch_name: None,
+                    dispatch_count: None,
+                    sum_match: None,
+                    join_name: Some(jn),
+                } => {
+                    // Join attribute: insert a synthetic ProductJoin BEFORE this node.
+                    // We emit the join node first, then the workflow node.
+                    // Edges pointing to `name` get rewritten to point to the join node,
+                    // and we add an edge join → name.
+                    let synth = format!("__join_{name}");
+                    out_nodes.push((synth.clone(), NodeConfig::ProductJoin {
+                        output_type_name: String::new(),
+                        input_type_names: String::new(),
+                        join_name: jn.clone(),
+                    }));
+                    join_rewrite.insert(name.clone(), synth.clone());
+                    // Emit the workflow node itself (without join attr).
+                    out_nodes.push((name, NodeConfig::Workflow {
+                        implementation: match &cfg {
+                            NodeConfig::Workflow { implementation, .. } => implementation.clone(),
+                            _ => unreachable!(),
+                        },
+                        dispatch_name: None,
+                        dispatch_count: None,
+                        sum_match: None,
+                        join_name: None,
+                    }));
+                    // Add synthetic edge: __join → workflow node.
+                    out_edges.push(EdgeConfig {
+                        from: synth,
+                        to: match out_nodes.last() { Some((n, _)) => n.clone(), None => continue },
+                        label: None,
+                        type_name: None,
+                        reshape_name: None,
+                    });
+                }
+                _ => {
+                    out_nodes.push((name, cfg));
+                }
+            }
+        }
+
+        // Process edges, rewriting as needed for dispatch/summatch/join synthetics.
+        for edge in edges {
+            // Check for reshape or connection attributes on the edge itself.
+            let has_reshape = edge.reshape_name.is_some();
+            let has_conn = edge.type_name.is_some() && edge.label.is_some();
+
+            // Determine effective from/to (after dispatch/summatch rewrite).
+            let effective_from = if let Some(synth) = dispatch_rewrite.get(&edge.from) {
+                // If the source node had a dispatch attr, edges from it should go to
+                // the synthetic dispatch node instead. But the dispatch node fans out
+                // to multiple targets — the original edges from the source still define
+                // the targets, but they now come FROM the dispatch node.
+                synth.clone()
+            } else if let Some(synth) = summatch_rewrite.get(&edge.from) {
+                synth.clone()
+            } else {
+                edge.from.clone()
+            };
+
+            let effective_to = if let Some(synth) = join_rewrite.get(&edge.to) {
+                synth.clone()
+            } else {
+                edge.to.clone()
+            };
+
+            // Handle edge-level structural attributes (reshape, connection).
+            if has_reshape {
+                // Insert a synthetic Reshape node between from and to.
+                let reshape_name = edge.reshape_name.clone().unwrap();
+                let synth = format!("__reshape_{}_{}", edge.from, edge.to);
+                out_nodes.push((synth.clone(), NodeConfig::Reshape { reshape_name }));
+                // from → reshape → to
+                out_edges.push(EdgeConfig {
+                    from: effective_from,
+                    to: synth.clone(),
+                    label: edge.label.clone(),
+                    type_name: None,
+                    reshape_name: None,
+                });
+                out_edges.push(EdgeConfig {
+                    from: synth,
+                    to: effective_to,
+                    label: None,
+                    type_name: None,
+                    reshape_name: None,
+                });
+            } else if has_conn {
+                // Insert a synthetic Connection node between from and to.
+                let label = edge.label.clone().unwrap_or_default();
+                let type_name = edge.type_name.clone().unwrap_or_default();
+                let synth = format!("__conn_{}_{}", edge.from, edge.to);
+                out_nodes.push((synth.clone(), NodeConfig::Connection { label, type_name }));
+                out_edges.push(EdgeConfig {
+                    from: effective_from,
+                    to: synth.clone(),
+                    label: None,
+                    type_name: None,
+                    reshape_name: None,
+                });
+                out_edges.push(EdgeConfig {
+                    from: synth,
+                    to: effective_to,
+                    label: None,
+                    type_name: None,
+                    reshape_name: None,
+                });
+            } else {
+                out_edges.push(EdgeConfig {
+                    from: effective_from,
+                    to: effective_to,
+                    label: edge.label,
+                    type_name: None,
+                    reshape_name: None,
+                });
+            }
+        }
+
+        Ok((out_nodes, out_edges))
+    }
+}
+
+/// ConfigBuilder 的构建输出。
+///
+/// 包含构建好的 DAG 和工具注册表。
+#[derive(Debug)]
+pub struct BuildOutput {
+    /// 工作流 ID。
+    pub id: WorkflowId,
+    /// 构建好的 DAG。
+    pub dag: WorkflowDag,
+    /// 工具注册表（从 `<tool>` 元素构建）。
+    pub tools: crate::workflow::tool_registry::ToolRegistry,
+}
+
+impl ConfigBuilder {
     /// Parse an XML string and build a `WorkflowDag`.
-    pub fn build_from_str(&self, xml: &str) -> Result<(WorkflowId, WorkflowDag), ConfigBuildError> {
+    pub fn build_from_str(&self, xml: &str) -> Result<BuildOutput, ConfigBuildError> {
         let config: WorkflowXml = quick_xml::de::from_str(xml)?;
         self.build(config.into())
     }
@@ -632,7 +1137,7 @@ impl ConfigBuilder {
     pub fn build_from_file(
         &self,
         path: &Path,
-    ) -> Result<(WorkflowId, WorkflowDag), ConfigBuildError> {
+    ) -> Result<BuildOutput, ConfigBuildError> {
         let xml = std::fs::read_to_string(path)?;
         self.build_from_str(&xml)
     }

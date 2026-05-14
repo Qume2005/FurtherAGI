@@ -1,6 +1,6 @@
 //! # 类型转换 Builtin Workflow
 //!
-//! 类型转换工作流，内部使用 [`MapFn`](crate::workflow::services::MapFn) 服务。
+//! 类型转换工作流，内部使用 [`MapFn`] 服务。
 
 use async_trait::async_trait;
 

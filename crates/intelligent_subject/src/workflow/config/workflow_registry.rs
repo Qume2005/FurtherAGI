@@ -24,7 +24,7 @@
 //! | 类别 | 依赖 |
 //! |------|------|
 //! | 外部 crate | 无 |
-//! | 内部模块 | [`crate::workflow::definition::ErasedWorkflow`] |
+//! | 内部模块 | [`ErasedWorkflow`] |
 //!
 //! ## 示例
 //!
