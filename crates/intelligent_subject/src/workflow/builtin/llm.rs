@@ -1,7 +1,7 @@
 //! # LLM Builtin Workflow
 //!
 //! 通过 LLM 服务调用大模型的 builtin workflow。
-//! 输出 `Result<LlmResponse, LlmError>` — 和类型，可接入 SumMatch 节点处理成功/失败。
+//! 输出 `Result<LlmResponse, LlmError>` — 和类型，可在命名空间工作流中处理成功/失败。
 
 use std::sync::Arc;
 
@@ -26,10 +26,8 @@ use crate::workflow::tool_registry::ToolRegistry;
 /// let service = Arc::new(OpenAiService::new("sk-...", "gpt-4o"));
 /// let wf = LlmComplete::new(service, Some("You are a helpful assistant.".into()));
 ///
-/// // 在 DAG 中使用，输出接入 SumMatch 处理错误：
-/// // ... → LlmComplete → SumMatch<Result<LlmResponse, LlmError>>
-/// //                        ├─ "ok"  → LlmResponse (成功)
-/// //                        └─ "err" → LlmError (失败)
+/// // 在 DAG 中使用：
+/// // ... → LlmComplete → 处理 Result<LlmResponse, LlmError>
 /// ```
 pub struct LlmComplete {
     service: Arc<dyn LlmService>,

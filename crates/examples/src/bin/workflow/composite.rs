@@ -1,48 +1,65 @@
-//! 组合工作流：用 DAG 串联多个闭包工作流。
+//! 命名空间复合工作流：用 PlanBuilder 构建多步管道并执行。演示如何用闭包创建工作流节点。
 //!
 //! 运行：`cargo run -p examples --bin workflow_composite`
 
 use std::sync::Arc;
 
-use intelligent_subject::workflow::dag::DagBuilder;
+use intelligent_subject::workflow::dag::PlanBuilder;
+use intelligent_subject::workflow::config::ParamValue;
+use intelligent_subject::workflow::definition::from_fn;
 use intelligent_subject::workflow::error::WorkflowError;
-use intelligent_subject::workflow::model::ExecutionContext;
-use intelligent_subject::workflow::workflow_manager::WorkflowManager;
+use intelligent_subject::workflow::executor::Executor;
+use intelligent_subject::workflow::model::{ExecutionContext, Namespace};
 use intelligent_subject::workflow::platform::NullPlatform;
 
 #[tokio::main]
 async fn main() -> Result<(), WorkflowError> {
-    let mgr = WorkflowManager::new();
     let ctx = ExecutionContext {
         platform: Arc::new(NullPlatform::new()),
     };
 
-    let mut builder = DagBuilder::new();
-    // 构建管道: AddOne(3) → MulTwo(4) → AddOne(9)
-    let a = builder.add("builtin@AddOne", |input: i32| async move {
-        Ok::<i32, WorkflowError>(input + 1)
-    });
-    let b = builder.add("builtin@MulTwo", |input: i32| async move {
-        Ok::<i32, WorkflowError>(input * 2)
-    });
-    let c = builder.add("builtin@AddOne", |input: i32| async move {
-        Ok::<i32, WorkflowError>(input + 1)
-    });
-    builder.connect(a, b)?;
-    builder.connect(b, c)?;
-    builder.set_entry(a)?;
-    builder.set_exit(c)?;
-    let dag = builder.build()?;
+    // 构建管道: append_x("hello") → append_x("helloX") → format("Report: helloXX")
+    let mut builder = PlanBuilder::new();
+    builder.add_workflow(
+        "a",
+        "append_x",
+        vec![("input".to_string(), ParamValue::Literal("hello".to_string()))],
+        from_fn("append_x", |input: String, _ctx: &ExecutionContext| async move {
+            Ok::<String, WorkflowError>(format!("{input}X"))
+        }),
+    );
+    builder.add_workflow(
+        "b",
+        "append_x",
+        vec![("input".to_string(), ParamValue::Reference {
+            namespace: "a".to_string(),
+            field: "value".to_string(),
+        })],
+        from_fn("append_x", |input: String, _ctx: &ExecutionContext| async move {
+            Ok::<String, WorkflowError>(format!("{input}X"))
+        }),
+    );
+    builder.add_workflow(
+        "report",
+        "format",
+        vec![("input".to_string(), ParamValue::Reference {
+            namespace: "b".to_string(),
+            field: "value".to_string(),
+        })],
+        from_fn("format", |input: String, _ctx: &ExecutionContext| async move {
+            Ok::<String, WorkflowError>(format!("Report: {input}"))
+        }),
+    );
+    builder.add_end("{report.value}");
 
-    mgr.register_composite("pipeline@Main", dag)?;
-    mgr.validate_all()?;
+    let plan = builder.build()?;
+    let ns = Namespace::new();
 
-    let result: i32 = mgr
-        .execute_typed("pipeline@Main", 3, &ctx)
-        .await?;
+    let result = Executor::execute(&plan, &ns, &ctx).await?;
+    let val = result.downcast_ref::<String>().unwrap();
 
-    println!("Pipeline(3) = {result}");
-    assert_eq!(result, 9);
+    println!("Pipeline: hello -> {val}");
+    assert_eq!(val, "Report: helloXX");
     println!("OK");
     Ok(())
 }

@@ -6,7 +6,7 @@
 //! ## 核心概念
 //!
 //! - **Workflow** — 强类型的「输入 → 处理 → 输出」管道，由 [`workflow::definition::Workflow`] trait 定义
-//! - **DAG** — 由 [`workflow::dag::WorkflowDag`] 表示的有向无环图，描述组合工作流的拓扑
+//! - **DAG** — 由 [`workflow::dag::ExecutionPlan`] 表示的有向无环图，描述组合工作流的拓扑
 //! - **WorkflowManager** — 中央注册器，管理所有工作流的生命周期和依赖校验
 //! - **WorkPlatform** — 运行时上下文，提供工作平台能力（文件系统、容器等）
 //!
@@ -26,7 +26,6 @@
 //! | `Clone` | Scatter-gather 节点：并行分支 + gather 元组输出 |
 //! | `Conditional` | 条件分支节点（true/false） |
 //! | `Loop` | 固定次数循环节点 |
-//! | `SubWorkflow` | 子工作流引用节点 |
 //! | `Connection` | 命名透传节点 |
 //! | `SumMatch` | 或类型拆解节点：`T | E` → ok(T) / err(E) |
 //! | `ProductJoin` | 和类型合并节点：多输入 → `(A, B, ...)` |

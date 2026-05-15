@@ -20,8 +20,8 @@
 //! | [`IntToString`] | `i32 → String` | 整数转字符串 |
 //! | [`ParseInt`] | `String → i32` | 字符串解析整数 |
 //! | [`BoolToInt`] | `bool → i32` | 布尔转整数 |
-//! | [`llm::LlmComplete`] | `LlmRequest → Result<LlmResponse, LlmError>` | LLM 聊天完成 |
-//! | [`llm::LlmCompleteWithTools`] | `LlmRequest → Result<LlmResponse, LlmError>` | LLM 带工具调用 |
+//! | [`LlmComplete`] | `LlmRequest → Result<LlmResponse, LlmError>` | LLM 聊天完成 |
+//! | [`LlmCompleteWithTools`] | `LlmRequest → Result<LlmResponse, LlmError>` | LLM 带工具调用 |
 //! | [`llm::LlmAgentLoop`] | `LlmRequest → Result<LlmResponse, LlmError>` | LLM Agentic Loop |
 //! | [`HttpCall`] | `HttpRequest → Result<HttpResponse, HttpError>` | HTTP 请求（GET/POST/PUT/PATCH/DELETE） |
 
@@ -49,9 +49,9 @@ pub fn register_builtins(registry: &mut WorkflowFactoryRegistry) {
     registry.register("int_to_string", || into_erased(IntToString));
     registry.register("parse_int", || into_erased(ParseInt));
     registry.register("bool_to_int", || into_erased(BoolToInt));
-    registry.register("http_get", || into_erased(self::http::http_get()));
-    registry.register("http_post", || into_erased(self::http::http_post()));
-    registry.register("http_put", || into_erased(self::http::http_put()));
-    registry.register("http_patch", || into_erased(self::http::http_patch()));
-    registry.register("http_delete", || into_erased(self::http::http_delete()));
+    registry.register("http_get", || into_erased(http::http_get()));
+    registry.register("http_post", || into_erased(http::http_post()));
+    registry.register("http_put", || into_erased(http::http_put()));
+    registry.register("http_patch", || into_erased(http::http_patch()));
+    registry.register("http_delete", || into_erased(http::http_delete()));
 }

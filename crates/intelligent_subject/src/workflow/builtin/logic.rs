@@ -117,7 +117,7 @@ impl Workflow<bool, bool> for Not {
 
 /// 逻辑与：`(bool, bool) → bool`。
 ///
-/// 需要配合 ProductJoin 节点将两个 bool 值合并为 tuple。
+/// 需要上游提供 `(bool, bool)` 元组输入。
 pub struct And;
 
 #[async_trait]
@@ -133,7 +133,7 @@ impl Workflow<(bool, bool), bool> for And {
 
 /// 逻辑或：`(bool, bool) → bool`。
 ///
-/// 需要配合 ProductJoin 节点将两个 bool 值合并为 tuple。
+/// 需要上游提供 `(bool, bool)` 元组输入。
 pub struct Or;
 
 #[async_trait]

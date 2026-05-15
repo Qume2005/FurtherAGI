@@ -8,6 +8,8 @@
 //! 不支持编程式注册。
 
 use std::any::Any;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::workflow::definition::ErasedWorkflow;
 use crate::workflow::error::WorkflowError;
@@ -85,14 +87,25 @@ impl ToolRegistry {
             }
         })?;
 
-        // 执行工作流
-        let result = entry
+        // 执行工作流 — 将输入包装到 HashMap 参数
+        let mut params: HashMap<String, Arc<dyn Any + Send + Sync>> = HashMap::new();
+        params.insert("input".to_string(), Arc::from(input));
+        let output = entry
             .workflow
-            .execute_erased(input, ctx)
+            .execute_erased(params, ctx)
             .await
             .map_err(|e| WorkflowError::ToolOutputError {
                 tool: tool_call.name.clone(),
                 message: e.to_string(),
+            })?;
+
+        // 从 NamespaceOutput 提取 "value" 字段
+        let result = output.fields.into_iter()
+            .find(|(k, _)| k == "value")
+            .map(|(_, v)| v)
+            .ok_or_else(|| WorkflowError::ToolOutputError {
+                tool: tool_call.name.clone(),
+                message: "no 'value' field in tool output".to_string(),
             })?;
 
         // 序列化输出

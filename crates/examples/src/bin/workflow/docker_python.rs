@@ -3,7 +3,7 @@
 //! 演示如何：
 //! - 创建 DockerPlatform（自动启动容器）
 //! - 通过 `add_with_ctx` 闭包访问 ctx.platform 调用平台方法
-//! - 在 DAG 中组合多个 Python 执行节点
+//! - 通过 WorkflowManager 串联多个 Python 执行节点
 //!
 //! **前提**：本地运行 Docker daemon，且已拉取 `python:3.12-slim` 镜像。
 //!
@@ -12,11 +12,10 @@
 //! cargo run -p examples --bin workflow_docker_python
 //! ```
 
-use intelligent_subject::workflow::dag::DagBuilder;
 use intelligent_subject::workflow::error::WorkflowError;
-use intelligent_subject::workflow::executor::Executor;
 use intelligent_subject::workflow::platform::{DockerPlatform, WorkPlatform};
 use intelligent_subject::workflow::model::ExecutionContext;
+use intelligent_subject::workflow::workflow_manager::WorkflowManager;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -48,12 +47,12 @@ print(f"Sum of 1..100 = {x})
     };
     println!("    输出:\n{}\n", result);
 
-    // ── 示例 B: DAG 管道 — Factorial(5) → ReverseUpper ─────────
-    println!("[3] DAG 管道: Factorial(5) → ReverseUpper...");
-    let mut builder = DagBuilder::new();
+    // ── 示例 B: WorkflowManager 管道 — Factorial(5) → ReverseUpper ─────────
+    println!("[3] WorkflowManager 管道: Factorial(5) → ReverseUpper...");
+    let mgr = WorkflowManager::new();
 
     // 第一个节点：接收 i32，生成计算阶乘的 Python 脚本，返回结果字符串
-    let factorial = builder.add_with_ctx("factorial", |input: i32, ctx: &ExecutionContext| {
+    mgr.add_with_ctx("factorial", |input: i32, ctx: &ExecutionContext| {
         let plat = ctx.platform.clone();
         async move {
             let code = format!(
@@ -65,9 +64,10 @@ print(f"Sum of 1..100 = {x})
             println!("    factorial({input}) = {result}");
             Ok::<String, WorkflowError>(result)
         }
-    });
+    })?;
+
     // 第二个节点：接收上一个节点的字符串输出，将其反转并大写
-    let reverse = builder.add_with_ctx("reverse_upper", |input: String, ctx: &ExecutionContext| {
+    mgr.add_with_ctx("reverse_upper", |input: String, ctx: &ExecutionContext| {
         let plat = ctx.platform.clone();
         async move {
             let code = format!(
@@ -79,18 +79,13 @@ print(f"Sum of 1..100 = {x})
             println!("    reverse_upper(\"{input}\") = \"{result}\"");
             Ok::<String, WorkflowError>(result)
         }
-    });
-
-    builder.connect(factorial, reverse)?;
-    builder.set_entry(factorial)?;
-    builder.set_exit(reverse)?;
-    let dag = builder.build()?;
+    })?;
 
     // 输入 5: factorial(5)=120 → reverse_upper("120")="021"
-    let result = Executor::execute(&dag, Box::new(5i32), &ctx).await?;
-    let output = result.output.downcast_ref::<String>().unwrap();
-    println!("    最终结果: \"{output}\"");
-    assert_eq!(output, "021");
+    let fact_result: String = mgr.execute_typed("factorial", 5i32, &ctx).await?;
+    let final_result: String = mgr.execute_typed("reverse_upper", fact_result, &ctx).await?;
+    println!("    最终结果: \"{final_result}\"");
+    assert_eq!(final_result, "021");
 
     // ── 清理 ────────────────────────────────────────────────
     println!("\n[4] 清理 Docker 容器...");

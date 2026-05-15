@@ -1,109 +1,146 @@
 //! # XML 配置驱动的工作流构建
 //!
-//! 从 XML 配置声明式构建工作流 DAG，然后注册到 `WorkflowManager`。
+//! 从 XML 配置声明式构建 [`ExecutionPlan`](crate::workflow::dag::ExecutionPlan)。
 //!
-//! ## 实现特色
+//! ## XML 元素
 //!
-//! - 双注册表设计：[`TypeRegistry`] 映射类型名到 `TypeId`，[`WorkflowFactoryRegistry`] 映射工作流名到工厂闭包
-//! - 使用 serde + quick-xml 反序列化 XML，`@` 前缀映射属性名
-//! - 10 种节点类型通过 XML 元素名区分（`<node>`、`<clone>`、`<conditional>` 等）
-//! - 结构性节点支持属性语法：在 `<node>` 或 `<connect>` 上声明，由构建器自动展开为合成节点
-//! - [`ConfigBuilder`] 在构建时桥接字符串名到 `TypeId` 和 `Box<dyn ErasedWorkflow>`
+//! 根元素为 `<workflow>`，内部包含 4 种子元素：
 //!
-//! ## 依赖
+//! | 元素 | 必填属性 | 说明 |
+//! |------|----------|------|
+//! | `<workflow>` | `result_name`, `impl` | 执行工作流，结果存入命名空间 |
+//! | `<if>` | `predicate` | 条件分支，内部是顺序子流程 |
+//! | `<loop>` | `result_name`, `state_init`, `next_state`, `count` | 固定次数循环 |
+//! | `<end>` | `result` | 终止工作流并返回结果 |
 //!
-//! | 类别 | 依赖 |
-//! |------|------|
-//! | 外部 crate | `quick-xml`（XML 反序列化）、`serde`（反序列化框架）、`thiserror`（错误派生） |
-//! | 内部模块 | [`crate::workflow::dag::{DagBuilder, WorkflowDag}`]、[`crate::workflow::model::{NodeId, WorkflowId}`]、[`crate::workflow::error::WorkflowError`] |
+//! 属性值支持两种形式：
+//! - **字面量**：`input="hello"` — 直接传入字符串
+//! - **引用**：`input="{a.value}"` — 从命名空间读取上游节点的输出
 //!
-//! ## 两个注册表
+//! ## 快速开始
 //!
-//! 配置文件用字符串引用类型和工作流，但 DAG 内部需要 `TypeId` 和
-//! `Box<dyn ErasedWorkflow>`。通过两个注册表桥接：
+//! ```rust
+//! use intelligent_subject::workflow::config::ConfigBuilder;
+//! use intelligent_subject::workflow::config::WorkflowFactoryRegistry;
+//! use intelligent_subject::workflow::definition::from_fn;
+//! use intelligent_subject::workflow::model::ExecutionContext;
+//! use intelligent_subject::workflow::error::WorkflowError;
 //!
-//! - [`TypeRegistry`] — 映射类型名字符串到 `TypeId` + `CloneFn`
-//! - [`WorkflowFactoryRegistry`] — 映射工作流名字符串到工厂闭包
+//! # #[tokio::main]
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut reg = WorkflowFactoryRegistry::new();
+//! reg.register("upper", || {
+//!     from_fn("upper", |input: String, _| async move {
+//!         Ok::<String, WorkflowError>(input.to_uppercase())
+//!     })
+//! });
 //!
-//! ## XML 配置结构
+//! let builder = ConfigBuilder::new(reg);
+//! let plan = builder.build_from_str(r#"
+//!     <workflow>
+//!       <workflow result_name="a" impl="upper" input="hello"/>
+//!       <end result="{a.value}"/>
+//!     </workflow>
+//! "#)?;
+//! assert_eq!(plan.topo_order.len(), 2);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## XML 示例集
+//!
+//! ### 线性管道
+//!
+//! 节点按依赖顺序依次执行。`b` 引用 `{a.value}`，自动等待 `a` 完成。
 //!
 //! ```xml
-//! <workflow name="my_pipeline" entry="add1" exit="mul2">
-//!   <node name="add1" implementation="add_one"/>
-//!   <node name="mul2" implementation="mul_two"/>
-//!   <connect from="add1" to="mul2"/>
+//! <workflow>
+//!   <workflow result_name="a" impl="append_x" input="hello"/>
+//!   <workflow result_name="b" impl="append_x" input="{a.value}"/>
+//!   <end result="{b.value}"/>
 //! </workflow>
 //! ```
 //!
-//! ## 节点类型
+//! 执行流程：`"hello"` → append_x → `"helloX"` → append_x → `"helloXX"` → 返回
 //!
-//! ### Workflow 节点（独立 XML 元素）
+//! ### 独立并行
 //!
-//! | XML 元素 | 必填属性 | 说明 |
-//! |----------|----------|------|
-//! | `<node>` | `name`, `implementation` | 引用注册的工作流工厂 |
-//! | `<clone>` | `name`, `type`, `output-type`, `gather` | Scatter-gather：并行分支 + gather |
-//! | `<conditional>` | `name`, `implementation` | 谓词工作流，必须输出 `bool` |
-//! | `<loop>` | `name`, `count`, `body-entry`, `body-exit` | 循环体节点在同一 DAG 内 |
-//! | `<sub-workflow>` | `name`, `workflow`, `input-type`, `output-type` | 引用其他已注册工作流 |
+//! 无依赖的节点自动并发执行。`<end>` 只选取 `x` 的值。
 //!
-//! ### 结构性节点（支持属性语法）
-//!
-//! | 操作 | 独立元素语法 | 属性语法 |
-//! |------|-------------|---------|
-//! | Connection | `<connection name="j" label="x" type="i32"/>` | `<connect ... label="x" type="i32"/>` |
-//! | Reshape | `<reshape name="r" reshape="fn"/>` | `<connect ... reshape="fn"/>` |
-//! | Dispatch | `<dispatch name="d" output-count="2" dispatch="fn"/>` | `<node ... dispatch="fn" dispatch-count="2"/>` |
-//! | SumMatch | `<sum-match ok-type="i32" err-type="String"/>` | `<node ... sum-match="i32/String"/>` |
-//! | ProductJoin | `<product-join join="fn"/>` | `<node ... join="fn"/>` |
-//!
-//! 属性语法由构建器在内部展开为合成 `NodeKind` 节点，DAG 结构不变。
-//!
-//! ## 完整用法
-//!
-//! ```rust
-//! use intelligent_subject::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
-//! use intelligent_subject::workflow::definition::{Workflow, into_erased};
-//! use intelligent_subject::workflow::model::ExecutionContext;
-//! use intelligent_subject::workflow::error::WorkflowError;
-//! use async_trait::async_trait;
-//!
-//! struct AddOne;
-//! #[async_trait]
-//! impl Workflow<i32, i32> for AddOne {
-//!     fn name(&self) -> &str { "add_one" }
-//!     async fn execute(&self, input: i32, _ctx: &ExecutionContext)
-//!         -> Result<i32, WorkflowError> { Ok(input + 1) }
-//! }
-//!
-//! // 1. 创建注册表
-//! let types = TypeRegistry::with_primitives();
-//! let mut workflows = WorkflowFactoryRegistry::new();
-//! workflows.register("add_one", || into_erased(AddOne));
-//!
-//! // 2. 从 XML 构建 DAG
-//! let builder = ConfigBuilder::new(types, workflows);
-//! let output = builder.build_from_str(r#"
-//!     <workflow name="pipeline" entry="a" exit="b">
-//!       <node name="a" implementation="add_one"/>
-//!       <node name="b" implementation="add_one"/>
-//!       <connect from="a" to="b"/>
-//!     </workflow>
-//! "#).unwrap();
-//!
-//! assert_eq!(output.id.as_str(), "pipeline");
-//! assert_eq!(output.dag.topo_order().len(), 2);
+//! ```xml
+//! <workflow>
+//!   <workflow result_name="x" impl="append_x" input="foo"/>
+//!   <workflow result_name="y" impl="append_x" input="bar"/>
+//!   <end result="{x.value}"/>
+//! </workflow>
 //! ```
+//!
+//! 执行流程：x 和 y 并发执行，end 等待两者完成后取 x 的值。
+//!
+//! ### 条件分支 (`<if>`)
+//!
+//! `<if>` 的 `predicate` 引用命名空间中的 `bool` 值。为 `true` 时顺序执行子节点。
+//!
+//! ```xml
+//! <workflow>
+//!   <workflow result_name="check" impl="is_positive" input="42"/>
+//!   <if predicate="{check.value}">
+//!     <workflow result_name="msg" impl="format" input="positive!"/>
+//!   </if>
+//!   <end result="{msg.value}"/>
+//! </workflow>
+//! ```
+//!
+//! 执行流程：`is_positive(42)` → `true` → `<if>` 执行 `format("positive!")` → `"Report: positive!"`
+//!
+//! 当 predicate 为 `false` 时，子节点跳过不执行。
+//!
+//! ### 固定次数循环 (`<loop>`)
+//!
+//! `<loop>` 通过 `state_init`（初始状态）和 `next_state`（每次迭代后的状态引用）
+//! 在迭代间传递状态。每次迭代中，当前状态通过 `latest_state` 可访问。
+//!
+//! ```xml
+//! <workflow>
+//!   <loop result_name="result" state_init="0" next_state="{step.value}" count="3">
+//!     <workflow result_name="step" impl="add_one" input="{latest_state}"/>
+//!   </loop>
+//!   <end result="{result}"/>
+//! </workflow>
+//! ```
+//!
+//! 执行流程：初始状态 `"0"` → 迭代 1: `add_one("0")="1"` → 迭代 2: `add_one("1")="2"` →
+//! 迭代 3: `add_one("2")="3"` → `"3"` 写入 `result` → 返回
+//!
+//! ### 多元素组合
+//!
+//! `<if>` 和 `<loop>` 可以与 `<workflow>` 自由组合：
+//!
+//! ```xml
+//! <workflow>
+//!   <workflow result_name="init" impl="identity" input="1"/>
+//!   <if predicate="{init.value}">
+//!     <loop result_name="sum" state_init="{init.value}" next_state="{accum.value}" count="5">
+//!       <workflow result_name="accum" impl="add_one" input="{latest_state}"/>
+//!     </loop>
+//!   </if>
+//!   <end result="{sum}"/>
+//! </workflow>
+//! ```
+//!
+//! ## 注册表
+//!
+//! - [`WorkflowFactoryRegistry`] — 映射工作流名字符串到工厂闭包。
+//!   同一个 `impl` 名可以被多个 `<workflow>` 元素引用，每次调用工厂产生独立实例。
 
-mod builder;
-mod error;
-mod registry;
-mod schema;
-mod workflow_registry;
+pub mod builder;
+pub mod error;
+pub mod param;
+pub mod registry;
+pub mod workflow_registry;
 
 pub use builder::ConfigBuilder;
-pub use builder::BuildOutput;
-pub use error::ConfigBuildError;
+pub use error::ConfigError;
+pub use param::{ParamValue, parse_param_value, referenced_namespace};
 pub use registry::TypeRegistry;
-pub use schema::{EdgeConfig, NodeConfig, ToolConfig, WorkflowConfig, WorkflowMeta};
 pub use workflow_registry::WorkflowFactoryRegistry;

@@ -1,13 +1,13 @@
 //! # 工作流工厂注册表（WorkflowFactoryRegistry）
 //!
-//! 将字符串工作流名映射到工厂闭包，用于从 TOML 配置实例化工作流。
+//! 将字符串工作流名映射到工厂闭包，用于从 XML 配置实例化工作流。
 //!
 //! ## 功能实现
 //!
-//! [`WorkflowFactoryRegistry`] 被 [`ConfigBuilder`](super::ConfigBuilder) 用来将 TOML 配置中的
+//! [`WorkflowFactoryRegistry`] 被 [`ConfigBuilder`](super::ConfigBuilder) 用来将 XML 配置中的
 //! 工作流名字符串（如 `"add_one"`）解析为 `Box<dyn ErasedWorkflow>` 实例。
 //!
-//! 因为 `ErasedWorkflow` 不是 `Clone`，当 TOML 配置中多个节点引用同一个工作流名时，
+//! 因为 `ErasedWorkflow` 不是 `Clone`，当 XML 配置中多个节点引用同一个工作流名时，
 //! 工厂模式允许为每个节点创建独立的新实例。
 //!
 //! ## 实现特色
@@ -17,7 +17,7 @@
 //! - [`register()`](WorkflowFactoryRegistry::register) 接受泛型 `Fn` 闭包，
 //!   必须满足 `Send + Sync + 'static`
 //! - [`create()`](WorkflowFactoryRegistry::create) 在名字未注册时返回 `None`，
-//!   由 `ConfigBuilder` 生成 `ConfigBuildError::UnknownWorkflow`
+//!   由 `ConfigBuilder` 生成 `ConfigError::UnknownImpl`
 //!
 //! ## 依赖
 //!
@@ -86,13 +86,12 @@ use std::collections::HashMap;
 
 use crate::workflow::definition::ErasedWorkflow;
 
-/// Registry mapping string names to workflow factory closures.
+/// 工作流工厂注册表：将字符串名映射到工厂闭包。
 ///
-/// Each entry stores a `Box<dyn Fn() -> Box<dyn ErasedWorkflow>>`, allowing
-/// the same implementation to be instantiated multiple times (since
-/// `ErasedWorkflow` is not `Clone`).
+/// 每个条目存储 `Box<dyn Fn() -> Box<dyn ErasedWorkflow>>`，
+/// 允许同一实现被多次实例化（因为 `ErasedWorkflow` 不是 `Clone`）。
 ///
-/// # Example
+/// # 示例
 ///
 /// ```rust
 /// use intelligent_subject::workflow::config::WorkflowFactoryRegistry;
@@ -120,17 +119,17 @@ pub struct WorkflowFactoryRegistry {
 }
 
 impl WorkflowFactoryRegistry {
-    /// Create an empty registry.
+    /// 创建空的注册表。
     pub fn new() -> Self {
         Self {
             factories: HashMap::new(),
         }
     }
 
-    /// Register a workflow factory by name.
+    /// 按名称注册工作流工厂。
     ///
-    /// The `factory` closure is called each time [`create`](Self::create)
-    /// is invoked with this name, producing a fresh `Box<dyn ErasedWorkflow>`.
+    /// 每次调用 [`create`](Self::create) 时都会执行 `factory` 闭包，
+    /// 生成新的 `Box<dyn ErasedWorkflow>` 实例。
     pub fn register<F>(&mut self, name: impl Into<String>, factory: F)
     where
         F: Fn() -> Box<dyn ErasedWorkflow> + Send + Sync + 'static,
@@ -138,17 +137,16 @@ impl WorkflowFactoryRegistry {
         self.factories.insert(name.into(), Box::new(factory));
     }
 
-    /// Create a new workflow instance by name.
+    /// 按名称创建新的工作流实例。
     ///
-    /// Returns `None` if no factory was registered under this name.
+    /// 如果该名称未注册工厂，返回 `None`。
     pub fn create(&self, name: &str) -> Option<Box<dyn ErasedWorkflow>> {
         self.factories.get(name).map(|f| f())
     }
 
-    /// Create a registry pre-loaded with all builtin workflows.
+    /// 创建预注册所有内置工作流的注册表。
     ///
-    /// After calling this, XML configs can reference names like
-    /// `"add_one"`, `"mul_two"`, `"is_positive"`, etc. directly.
+    /// 调用后，XML 配置可直接引用 `"add_one"`、`"mul_two"`、`"is_positive"` 等名称。
     pub fn with_builtins() -> Self {
         let mut reg = Self::new();
         crate::workflow::builtin::register_builtins(&mut reg);

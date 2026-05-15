@@ -1,12 +1,11 @@
 //! # 类型注册表（TypeRegistry）
 //!
-//! 将字符串类型名映射到 `TypeId` 和 `CloneFn`。
+//! 将字符串类型名映射到 `TypeId`。
 //!
 //! ## 功能实现
 //!
-//! [`TypeRegistry`] 被 [`ConfigBuilder`](super::ConfigBuilder) 用来将 TOML 配置中的
-//! 类型名字符串（如 `"i32"`、`"String"`）解析为 `DagBuilder` 所需的 `TypeId` 和
-//! 广播节点克隆函数 `CloneFn`。
+//! [`TypeRegistry`] 被 [`ConfigBuilder`](super::ConfigBuilder) 用来将 XML 配置中的
+//! 类型名字符串（如 `"i32"`、`"String"`）解析为 `PlanBuilder` 所需的 `TypeId`。
 //!
 //! 还支持注册工具类型的 serde 闭包，
 //! 用于 `<tool>` 元素的 JSON 参数反序列化和输出序列化。
@@ -15,9 +14,9 @@
 //!
 //! - [`with_primitives()`](TypeRegistry::with_primitives) 预注册 14 种常见 Rust 类型：
 //!   `i8` ~ `i128`、`u8` ~ `u128`、`f32`、`f64`、`bool`、`String`
-//! - `register::<T>()` 自动捕获 `TypeId::of::<T>()` 和 `make_clone_fn::<T>()`
+//! - `register::<T>()` 自动捕获 `TypeId::of::<T>()`
 //! - `register_tool_type::<T>()` 额外捕获 serde 闭包（用于 `<tool>` 元素）
-//! - `get()` 返回 `(TypeId, CloneFn)` 元组，供 `DagBuilder` 直接使用
+//! - `get()` 返回 `TypeId`，供 `PlanBuilder` 直接使用
 //!
 //! ## 示例
 //!
@@ -30,7 +29,7 @@
 //! types.register::<i32>("i32");
 //! types.register::<String>("String");
 //!
-//! let (id, clone_fn) = types.get("i32").unwrap();
+//! let id = types.get("i32").unwrap();
 //! assert_eq!(id, std::any::TypeId::of::<i32>());
 //! ```
 
@@ -38,7 +37,6 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::workflow::dag::{CloneFn, make_clone_fn};
 use crate::workflow::error::WorkflowError;
 
 type BoxedValue = Box<dyn std::any::Any + Send + Sync>;
@@ -49,14 +47,13 @@ type SerializeFn = Arc<dyn Fn(&BoxedValue) -> Result<String, WorkflowError> + Se
 
 struct TypeInfo {
     type_id: TypeId,
-    clone_fn: CloneFn,
     deserialize_fn: Option<DeserializeFn>,
     serialize_fn: Option<SerializeFn>,
 }
 
-/// Registry mapping string type names to their `TypeId` and clone function.
+/// 类型注册表：将字符串类型名映射到 `TypeId`。
 ///
-/// # Example
+/// # 示例
 ///
 /// ```rust
 /// use intelligent_subject::workflow::config::TypeRegistry;
@@ -65,7 +62,7 @@ struct TypeInfo {
 /// types.register::<i32>("i32");
 /// types.register::<String>("String");
 ///
-/// let (id, clone_fn) = types.get("i32").unwrap();
+/// let id = types.get("i32").unwrap();
 /// assert_eq!(id, std::any::TypeId::of::<i32>());
 /// ```
 pub struct TypeRegistry {
@@ -73,17 +70,16 @@ pub struct TypeRegistry {
 }
 
 impl TypeRegistry {
-    /// Create an empty type registry.
+    /// 创建空的类型注册表。
     pub fn new() -> Self {
         Self {
             types: HashMap::new(),
         }
     }
 
-    /// Create a type registry pre-loaded with common Rust primitive types.
+    /// 创建预注册 14 种常见 Rust 类型的注册表。
     ///
-    /// Registered types: `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`,
-    /// `u32`, `u64`, `u128`, `f32`, `f64`, `bool`, `String`.
+    /// 包含：`i8` ~ `i128`、`u8` ~ `u128`、`f32`、`f64`、`bool`、`String`。
     pub fn with_primitives() -> Self {
         let mut reg = Self::new();
         reg.register::<i8>("i8");
@@ -103,24 +99,23 @@ impl TypeRegistry {
         reg
     }
 
-    /// Register a type by name.
+    /// 按名称注册类型。
     ///
-    /// `T` must implement `Clone + Send + Sync + 'static`.
-    /// If the name already exists, it is overwritten.
-    pub fn register<T: Clone + Send + Sync + 'static>(&mut self, name: impl Into<String>) {
+    /// `T` 必须实现 `Send + Sync + 'static`。
+    /// 如果名称已存在则覆盖。
+    pub fn register<T: Send + Sync + 'static>(&mut self, name: impl Into<String>) {
         let info = TypeInfo {
             type_id: TypeId::of::<T>(),
-            clone_fn: make_clone_fn::<T>(),
             deserialize_fn: None,
             serialize_fn: None,
         };
         self.types.insert(name.into(), info);
     }
 
-    /// Register a type for tool use, including serde closures.
+    /// 注册工具类型（含 serde 闭包）。
     ///
-    /// In addition to `Clone`, `T` must implement `DeserializeOwned` and `Serialize`.
-    /// Required for types used as tool input/output in XML `<tool>` elements.
+    /// 除 `Clone` 外，`T` 还必须实现 `DeserializeOwned` 和 `Serialize`。
+    /// 用于 XML `<tool>` 元素的工具输入/输出类型。
     ///
     /// # Example
     ///
@@ -162,24 +157,23 @@ impl TypeRegistry {
 
         let info = TypeInfo {
             type_id: TypeId::of::<T>(),
-            clone_fn: make_clone_fn::<T>(),
             deserialize_fn: Some(deserialize),
             serialize_fn: Some(serialize),
         };
         self.types.insert(name.into(), info);
     }
 
-    /// Look up a type by name.
+    /// 按名称查找类型。
     ///
-    /// Returns `(TypeId, CloneFn)` if found, `None` otherwise.
-    pub fn get(&self, name: &str) -> Option<(TypeId, CloneFn)> {
-        self.types.get(name).map(|info| (info.type_id, info.clone_fn))
+    /// 找到返回 `TypeId`，否则返回 `None`。
+    pub fn get(&self, name: &str) -> Option<TypeId> {
+        self.types.get(name).map(|info| info.type_id)
     }
 
-    /// Look up serde closures for a tool type by name.
+    /// 按名称查找工具类型的 serde 闭包。
     ///
-    /// Returns `(DeserializeFn, SerializeFn)` if the type was registered via
-    /// [`register_tool_type`](Self::register_tool_type), `None` otherwise.
+    /// 如果类型通过 [`register_tool_type`](Self::register_tool_type) 注册，
+    /// 返回 `(DeserializeFn, SerializeFn)`，否则返回 `None`。
     pub fn get_serde(
         &self,
         name: &str,
@@ -209,10 +203,10 @@ mod tests {
         reg.register::<i32>("i32");
         reg.register::<String>("String");
 
-        let (id, _) = reg.get("i32").unwrap();
+        let id = reg.get("i32").unwrap();
         assert_eq!(id, TypeId::of::<i32>());
 
-        let (id, _) = reg.get("String").unwrap();
+        let id = reg.get("String").unwrap();
         assert_eq!(id, TypeId::of::<String>());
 
         assert!(reg.get("f64").is_none());
@@ -228,15 +222,5 @@ mod tests {
         assert!(reg.get("bool").is_some());
         assert!(reg.get("String").is_some());
         assert!(reg.get("NonExistent").is_none());
-    }
-
-    #[test]
-    fn clone_fn_works() {
-        let reg = TypeRegistry::with_primitives();
-        let (_, clone_fn) = reg.get("i32").unwrap();
-
-        let original: Box<dyn std::any::Any + Send + Sync> = Box::new(42i32);
-        let cloned = clone_fn(original.as_ref());
-        assert_eq!(*cloned.downcast_ref::<i32>().unwrap(), 42);
     }
 }

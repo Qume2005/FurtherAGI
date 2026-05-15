@@ -28,11 +28,13 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use bollard::container::{
-    Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
-};
 use bollard::exec::{CreateExecOptions, StartExecResults};
+use bollard::models::ContainerCreateBody;
 use bollard::Docker;
+use bollard_stubs::models::HostConfig;
+use bollard_stubs::query_parameters::{
+    CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
+};
 use tempfile::TempDir;
 
 use super::api::{CommandOutput, PlatformError, WorkPlatform};
@@ -102,15 +104,15 @@ impl DockerPlatform {
         let host_path = host_workspace.path().to_string_lossy().into_owned();
 
         let options = CreateContainerOptions {
-            name: format!("intelligent_subject_{}", std::process::id()),
+            name: Some(format!("intelligent_subject_{}", std::process::id())),
             ..Default::default()
         };
 
-        let config = Config {
-            image: Some(image),
-            cmd: Some(vec!["sleep", "infinity"]),
-            working_dir: Some("/workspace"),
-            host_config: Some(bollard::service::HostConfig {
+        let config = ContainerCreateBody {
+            image: Some(image.to_string()),
+            cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
+            working_dir: Some("/workspace".to_string()),
+            host_config: Some(HostConfig {
                 binds: Some(vec![format!("{host_path}:/workspace")]),
                 ..Default::default()
             }),
@@ -125,7 +127,7 @@ impl DockerPlatform {
         let container_id = result.id;
 
         docker
-            .start_container(&container_id, None::<StartContainerOptions<String>>)
+            .start_container(&container_id, None::<StartContainerOptions>)
             .await
             .map_err(|e| PlatformError::Docker(e.to_string()))?;
 

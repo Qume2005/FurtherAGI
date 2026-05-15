@@ -1,8 +1,8 @@
 //! HTTP 工作流示例：将 HTTP 方法作为 builtin workflow 在 DAG 中使用。
 //!
 //! 演示如何：
-//! - 使用 `http_get` / `http_post` 等 builtin workflow 通过 ConfigBuilder 注册
-//! - 通过 `<tool>` 元素将 HTTP workflow 暴露为 LLM 可调用的工具
+//! - 使用 `from_fn` 创建 mock HTTP workflow
+//! - 通过 WorkflowManager 注册和执行 HTTP 处理工作流
 //! - 手动构建 ToolRegistry 模拟 LLM tool_call 完整流程
 //!
 //! **注意**：本示例使用 mock workflow 演示 DAG 构建和工具注册流程，
@@ -13,10 +13,8 @@
 use std::sync::Arc;
 
 use intelligent_subject::workflow::builtin::http::{HttpError, HttpRequest, HttpResponse};
-use intelligent_subject::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
 use intelligent_subject::workflow::definition::from_fn;
 use intelligent_subject::workflow::error::WorkflowError;
-use intelligent_subject::workflow::executor::Executor;
 use intelligent_subject::workflow::model::ExecutionContext;
 use intelligent_subject::workflow::platform::NullPlatform;
 
@@ -57,73 +55,26 @@ fn mock_http_post() -> Box<dyn intelligent_subject::workflow::definition::Erased
     )
 }
 
-// ── 场景 1：ConfigBuilder + <tool> 注册 HTTP 为 LLM 工具 ──────
+// ── 场景 1：WorkflowManager 注册 HTTP mock workflow ──────────
 
-async fn scenario_config_driven(ctx: &ExecutionContext) -> anyhow::Result<()> {
-    println!("=== Scenario 1: Config-driven <tool> for HTTP ===");
+async fn scenario_workflow_manager(ctx: &ExecutionContext) -> anyhow::Result<()> {
+    println!("=== Scenario 1: WorkflowManager with HTTP mock ===");
 
-    let mut types = TypeRegistry::with_primitives();
-    // 注册 HTTP 工具类型（支持 JSON serde）
-    types.register_tool_type::<HttpRequest>("HttpRequest");
-    types.register_tool_type::<HttpResponse>("HttpResponse");
+    let mgr = intelligent_subject::workflow::workflow_manager::WorkflowManager::new();
 
-    let mut workflows = WorkflowFactoryRegistry::new();
+    // 注册 extract_status workflow
+    mgr.add("extract_status", |input: HttpResponse| async move {
+        println!("    ExtractStatus: HTTP {}", input.status);
+        Ok::<u16, WorkflowError>(input.status)
+    })?;
 
-    // 使用 mock 替代真实 HTTP（生产环境用 http_get() / http_post()）
-    workflows.register("http_get", || mock_http_get());
-    workflows.register("http_post", || mock_http_post());
-
-    // 辅助 workflow：从 HttpResponse 提取 status
-    workflows.register("extract_status", || from_fn("extract_status",
-        |input: HttpResponse, _ctx: &ExecutionContext| async move {
-            println!("    ExtractStatus: HTTP {}", input.status);
-            Ok::<u16, WorkflowError>(input.status)
-        }
-    ));
-
-    let builder = ConfigBuilder::new(types, workflows);
-
-    // XML 配置：定义工作流 + <tool> 暴露 HTTP 为 LLM 工具
-    let xml = r#"
-    <workflow name="http_tool_demo" entry="status" exit="status">
-      <node name="status" implementation="extract_status"/>
-      <tool name="http_get"
-            description="发送 HTTP GET 请求"
-            implementation="http_get"
-            input-type="HttpRequest"
-            output-type="HttpResponse"
-            parameters='{"type":"object","properties":{"url":{"type":"string"},"headers":{"type":"object"},"body":{"type":"object"}},"required":["url"]}'/>
-      <tool name="http_post"
-            description="发送 HTTP POST 请求"
-            implementation="http_post"
-            input-type="HttpRequest"
-            output-type="HttpResponse"
-            parameters='{"type":"object","properties":{"url":{"type":"string"},"headers":{"type":"object"},"body":{"type":"object"}},"required":["url"]}'/>
-    </workflow>"#;
-
-    let output = builder.build_from_str(xml)?;
-    println!("  DAG: {} nodes", output.dag.topo_order().len());
-
-    // 验证工具注册
-    let tool_defs = output.tools.get_tool_definitions();
-    println!("  Tools registered: {}", tool_defs.len());
-    for def in &tool_defs {
-        println!("    Tool: {} — {}", def.name, def.description);
-    }
-    assert_eq!(tool_defs.len(), 2);
-    let names: Vec<&str> = tool_defs.iter().map(|d| d.name.as_str()).collect();
-    assert!(names.contains(&"http_get"));
-    assert!(names.contains(&"http_post"));
-
-    // 执行 DAG（extract_status 节点）
     let test_response = HttpResponse {
         status: 200,
         body: serde_json::json!({"message": "ok"}),
     };
-    let result = Executor::execute(&output.dag, Box::new(test_response), ctx).await?;
-    let status = result.output.downcast_ref::<u16>().unwrap();
-    println!("  DAG execution result: HTTP {}", status);
-    assert_eq!(*status, 200);
+    let status: u16 = mgr.execute_typed("extract_status", test_response, ctx).await?;
+    println!("  Result: HTTP {status}");
+    assert_eq!(status, 200);
 
     println!("  OK\n");
     Ok(())
@@ -179,7 +130,7 @@ async fn scenario_tool_call(ctx: &ExecutionContext) -> anyhow::Result<()> {
         name: "http_get".to_string(),
         arguments: serde_json::to_string(&serde_json::json!({
             "url": "https://api.example.com/users/42"
-        })).unwrap(),
+        }))?,
     };
 
     println!("  Calling tool '{}' (id: {})", tool_call.name, tool_call.id);
@@ -268,7 +219,7 @@ async fn scenario_multi_tools(ctx: &ExecutionContext) -> anyhow::Result<()> {
     let get_call = ToolCall {
         id: "call_1".to_string(),
         name: "http_get".to_string(),
-        arguments: serde_json::to_string(&serde_json::json!({"url": "https://api.example.com/users"})).unwrap(),
+        arguments: serde_json::to_string(&serde_json::json!({"url": "https://api.example.com/users"}))?,
     };
     let post_call = ToolCall {
         id: "call_2".to_string(),
@@ -276,7 +227,7 @@ async fn scenario_multi_tools(ctx: &ExecutionContext) -> anyhow::Result<()> {
         arguments: serde_json::to_string(&serde_json::json!({
             "url": "https://api.example.com/users",
             "body": {"name": "Alice", "age": 30}
-        })).unwrap(),
+        }))?,
     };
 
     let get_result = registry.execute_tool(&get_call, ctx).await?;
@@ -302,7 +253,7 @@ async fn main() -> anyhow::Result<()> {
         platform: Arc::new(NullPlatform::new()),
     };
 
-    scenario_config_driven(&ctx).await?;
+    scenario_workflow_manager(&ctx).await?;
     scenario_tool_call(&ctx).await?;
     scenario_multi_tools(&ctx).await?;
 

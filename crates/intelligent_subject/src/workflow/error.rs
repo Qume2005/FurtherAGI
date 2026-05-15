@@ -85,7 +85,7 @@ pub enum WorkflowError {
     /// 两个相连节点之间的类型不匹配。
     ///
     /// 上游节点的输出 `TypeId` 与下游节点的输入 `TypeId` 不一致。
-    /// 在 [`DagBuilder::connect`](super::dag::DagBuilder::connect) 时检测。
+    /// 在 [`PlanBuilder`](super::dag::PlanBuilder) 构建时检测。
     #[error("type mismatch from node {from_node:?} to node {to_node:?}: expected {expected}, got {actual}")]
     TypeMismatch {
         from_node: NodeId,
@@ -96,7 +96,7 @@ pub enum WorkflowError {
 
     /// DAG 中检测到环。
     ///
-    /// 由 [`DagBuilder::build`](super::dag::DagBuilder::build) 中的 Kahn 算法检测。
+    /// 由 [`PlanBuilder::build`](super::dag::PlanBuilder::build) 中的 Kahn 算法检测。
     /// `nodes` 字段列出参与环的所有节点。
     #[error("cycle detected among nodes: {nodes:?}")]
     CycleDetected { nodes: Vec<NodeId> },

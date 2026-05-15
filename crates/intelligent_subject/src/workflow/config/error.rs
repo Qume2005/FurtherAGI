@@ -1,73 +1,32 @@
-//! # 配置构建错误
+//! # 命名空间配置构建错误类型
 //!
-//! 定义从 XML 配置构建工作流 DAG 时可能出现的错误。
+//! 定义 [`ConfigBuilder`](super::ConfigBuilder) 在解析 XML、查找工作流实现、
+//! 构建 DAG 时可能返回的错误。
 //!
-//! ## 功能实现
+//! ## 错误类型
 //!
-//! [`ConfigBuildError`] 枚举包含多种变体，覆盖配置构建全流程：
+//! | 变体 | 场景 | 示例 |
+//! |------|------|------|
+//! | `ParseError` | XML 格式不合法 | 缺少闭合标签 |
+//! | `IoError` | 文件读取失败 | 配置文件不存在 |
+//! | `UnknownImpl` | `impl="..."` 引用了未注册的工作流 | `impl="not_registered"` |
+//! | `UnknownReference` | `{ref}` 引用了不存在的 result_name | `{missing.value}` |
+//! | `PlanError` | DAG 构建失败（环依赖等） | A→B→A 循环引用 |
+//! | `MissingEnd` | XML 中缺少 `<end>` 元素 | 只有 `<workflow>` 没有 `<end>` |
+//! | `DuplicateResultName` | 多个节点的 `result_name` 重复 | 两个节点都叫 `"a"` |
 //!
-//! - **`ParseError`** — XML 反序列化错误（由 serde + quick-xml 自动产生）
-//! - **`IoError`** — 文件读取 I/O 错误（仅 `build_from_file` 路径）
-//! - **`UnknownType`** — 节点引用了未注册的类型名
-//! - **`UnknownWorkflow`** — 节点引用了未注册的工作流工厂名
-//! - **`UnknownNode`** — 边或循环体引用了不存在的节点名
-//! - **`UnknownSumMatch`** — 节点引用了未注册的 sum-match 工厂
-//! - **`UnknownProductJoin`** — 节点引用了未注册的 product-join 工厂
-//! - **`UnknownCloneGather`** — 节点引用了未注册的 clone gather 工厂
-//! - **`UnknownReshape`** — 节点引用了未注册的 reshape 函数
-//! - **`UnknownDispatch`** — 节点引用了未注册的 dispatch 函数
-//! - **`MissingDispatchCount`** — `dispatch` 属性缺少 `dispatch-count`
-//! - **`ConflictingAttributes`** — 属性冲突
-//! - **`DagError`** — 底层 DAG 构建错误（类型不匹配、环等）
+//! ## 与 WorkflowError 的关系
 //!
-//! ## 实现特色
-//!
-//! - 通过 `thiserror` 自动实现 `Error` trait 和 `Display`
-//! - `#[from]` 自动从 `quick_xml::de::DeError` 和 `std::io::Error` 转换
-//! - `UnknownType` 和 `UnknownWorkflow` 同时包含节点名和引用名，便于精确定位问题
-//! - `DagError` 封装底层 [`WorkflowError`](WorkflowError)，
-//!   保留完整的错误链
-//!
-//! ## 依赖
-//!
-//! | 类别 | 依赖 |
-//! |------|------|
-//! | 外部 crate | `thiserror`（错误派生宏）、`quick-xml`（XML 反序列化） |
-//! | 内部模块 | [`WorkflowError`] |
-//!
-//! ## 示例
-//!
-//! **匹配配置构建错误：**
-//!
-//! ```rust
-//! use intelligent_subject::workflow::config::ConfigBuildError;
-//!
-//! let xml = r#"<workflow name="test" entry="a" exit="a">
-//!   <node name="a" implementation="nonexistent"/>
-//! </workflow>"#;
-//!
-//! let types = intelligent_subject::workflow::config::TypeRegistry::new();
-//! let workflows = intelligent_subject::workflow::config::WorkflowFactoryRegistry::new();
-//! let builder = intelligent_subject::workflow::config::ConfigBuilder::new(types, workflows);
-//!
-//! let result = builder.build_from_str(xml);
-//! match result {
-//!     Err(ConfigBuildError::UnknownWorkflow { node, name }) => {
-//!         assert_eq!(node, "a");
-//!         assert_eq!(name, "nonexistent");
-//!     }
-//!     Err(ConfigBuildError::DagError(_)) => { /* DAG 层面错误 */ }
-//!     _ => {}
-//! }
-//! ```
+//! [`ConfigError`] 是配置阶段的错误，构建完成后执行阶段的错误由
+//! [`WorkflowError`] 承载。
+//! `PlanError` 变体内嵌 `WorkflowError`，用于传播 DAG 构建错误。
 
 use crate::workflow::error::WorkflowError;
-use thiserror::Error;
 
-/// 从 XML 配置构建工作流 DAG 时可能出现的错误。
-#[derive(Error, Debug)]
-pub enum ConfigBuildError {
-    /// XML 反序列化错误。
+/// 配置构建错误。
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    /// XML 解析错误。
     #[error("XML parse error: {0}")]
     ParseError(#[from] quick_xml::de::DeError),
 
@@ -75,69 +34,29 @@ pub enum ConfigBuildError {
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// 节点引用了未注册的类型名。
-    #[error("unknown type '{name}' referenced in node '{node}'")]
-    UnknownType {
-        node: String,
+    /// 引用了未注册的工作流实现。
+    #[error("unknown workflow impl '{name}' in element '{element}'")]
+    UnknownImpl {
+        element: String,
         name: String,
     },
 
-    /// 节点引用了未注册的工作流工厂名。
-    #[error("unknown workflow '{name}' referenced in node '{node}'")]
-    UnknownWorkflow {
-        node: String,
+    /// 引用了不存在的 result_name。
+    #[error("unknown result_name '{name}' referenced in element '{element}'")]
+    UnknownReference {
+        element: String,
         name: String,
     },
 
-    /// 引用了不存在的节点名。
-    #[error("unknown node '{0}'")]
-    UnknownNode(String),
+    /// DAG 构建错误（环检测等）。
+    #[error("plan error: {0}")]
+    PlanError(#[from] WorkflowError),
 
-    /// 节点引用了未注册的 sum-match 类型名组合。
-    #[error("unknown sum-match ok-type='{ok_type}' err-type='{err_type}' in node '{node}'")]
-    UnknownSumMatch {
-        node: String,
-        ok_type: String,
-        err_type: String,
-    },
+    /// 缺少必要的 `<end>` 元素。
+    #[error("missing <end> element")]
+    MissingEnd,
 
-    /// 节点引用了未注册的 product-join 工厂名。
-    #[error("unknown product-join '{name}' in node '{node}'")]
-    UnknownProductJoin {
-        node: String,
-        name: String,
-    },
-
-    /// 节点引用了未注册的 clone scatter-gather 工厂名。
-    #[error("unknown clone gather '{name}' in node '{node}'")]
-    UnknownCloneGather {
-        node: String,
-        name: String,
-    },
-
-    /// 节点引用了未注册的 reshape 函数名。
-    #[error("unknown reshape '{name}' in node '{node}'")]
-    UnknownReshape {
-        node: String,
-        name: String,
-    },
-
-    /// 节点引用了未注册的 dispatch 函数名。
-    #[error("unknown dispatch '{name}' in node '{node}'")]
-    UnknownDispatch {
-        node: String,
-        name: String,
-    },
-
-    /// 底层 DAG 构建错误（类型不匹配、环等）。
-    #[error("DAG error: {0}")]
-    DagError(#[from] WorkflowError),
-
-    /// 属性冲突：dispatch 需要 dispatch-count。
-    #[error("node '{node}': 'dispatch' requires 'dispatch-count'")]
-    MissingDispatchCount { node: String },
-
-    /// 属性冲突：不可同时指定。
-    #[error("node '{node}': conflicting attributes {attrs}")]
-    ConflictingAttributes { node: String, attrs: String },
+    /// 重复的 result_name。
+    #[error("duplicate result_name '{0}'")]
+    DuplicateResultName(String),
 }

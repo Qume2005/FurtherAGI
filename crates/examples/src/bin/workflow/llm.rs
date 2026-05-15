@@ -157,33 +157,6 @@ fn mock_get_news() -> Box<dyn intelligent_subject::workflow::definition::ErasedW
     )
 }
 
-/// 场景 4 用：直接输出 HttpResponse（匹配 ConfigBuilder 的 output-type serde 闭包）
-fn mock_get_weather_direct() -> Box<dyn intelligent_subject::workflow::definition::ErasedWorkflow> {
-    from_fn(
-        "mock_get_weather_direct",
-        |input: HttpRequest, _ctx: &ExecutionContext| async move {
-            println!("    [Tool] get_weather: url={}", input.url);
-            Ok::<HttpResponse, WorkflowError>(HttpResponse {
-                status: 200,
-                body: serde_json::json!({"city": "Beijing", "temp": "22°C", "condition": "sunny"}),
-            })
-        },
-    )
-}
-
-fn mock_get_news_direct() -> Box<dyn intelligent_subject::workflow::definition::ErasedWorkflow> {
-    from_fn(
-        "mock_get_news_direct",
-        |input: HttpRequest, _ctx: &ExecutionContext| async move {
-            println!("    [Tool] get_news: url={}", input.url);
-            Ok::<HttpResponse, WorkflowError>(HttpResponse {
-                status: 200,
-                body: serde_json::json!({"topic": "Beijing", "headline": "AI breakthrough reported"}),
-            })
-        },
-    )
-}
-
 // ── 构建工具注册表 ─────────────────────────────────────────────
 
 fn build_tool_registry() -> ToolRegistry {
@@ -355,67 +328,18 @@ async fn scenario_agent_loop(ctx: &ExecutionContext) -> anyhow::Result<()> {
     Ok(())
 }
 
-// ── 场景 4：Config-driven XML 定义工具 + AgentLoop ─────────────
+// ── 场景 4：ToolRegistry + AgentLoop 组合 ─────────────
 
-async fn scenario_config_driven(ctx: &ExecutionContext) -> anyhow::Result<()> {
-    use intelligent_subject::workflow::config::{ConfigBuilder, TypeRegistry, WorkflowFactoryRegistry};
-    use intelligent_subject::workflow::executor::Executor;
+async fn scenario_tool_agent(ctx: &ExecutionContext) -> anyhow::Result<()> {
+    println!("=== Scenario 4: ToolRegistry + AgentLoop ===");
 
-    println!("=== Scenario 4: Config-driven XML + AgentLoop ===");
-
-    // 注册类型和工厂
-    let mut types = TypeRegistry::with_primitives();
-    types.register_tool_type::<HttpRequest>("HttpRequest");
-    types.register_tool_type::<HttpResponse>("HttpResponse");
-
-    let mut workflows = WorkflowFactoryRegistry::new();
-    workflows.register("mock_get_weather", || mock_get_weather_direct());
-    workflows.register("mock_get_news", || mock_get_news_direct());
-    // extract_status 用于 DAG 内部处理
-    workflows.register("extract_status", || {
-        from_fn("extract_status", |input: HttpResponse, _ctx: &ExecutionContext| async move {
-            Ok::<u16, WorkflowError>(input.status)
-        })
-    });
-
-    let builder = ConfigBuilder::new(types, workflows);
-
-    let xml = r#"
-    <workflow name="agent_pipeline" entry="status" exit="status">
-      <node name="status" implementation="extract_status"/>
-      <tool name="get_weather"
-            description="获取城市天气"
-            implementation="mock_get_weather"
-            input-type="HttpRequest"
-            output-type="HttpResponse"
-            parameters='{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}'/>
-      <tool name="get_news"
-            description="获取新闻"
-            implementation="mock_get_news"
-            input-type="HttpRequest"
-            output-type="HttpResponse"
-            parameters='{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}'/>
-    </workflow>"#;
-
-    let output = builder.build_from_str(xml)?;
-
-    println!("  DAG: {} nodes", output.dag.topo_order().len());
-    let tool_defs = output.tools.get_tool_definitions();
-    println!("  Tools: {:?}", tool_defs.iter().map(|d| &d.name).collect::<Vec<_>>());
-    assert_eq!(tool_defs.len(), 2);
-
-    // 执行 DAG
-    let test_resp = HttpResponse {
-        status: 200,
-        body: serde_json::json!({"ok": true}),
-    };
-    let result = Executor::execute(&output.dag, Box::new(test_resp), ctx).await?;
-    let status = result.output.downcast_ref::<u16>().unwrap();
-    println!("  DAG execution: HTTP {}", status);
+    let tool_registry = build_tool_registry();
+    println!("  Tools: {:?}", tool_registry.get_tool_definitions().iter().map(|d| &d.name).collect::<Vec<_>>());
+    assert_eq!(tool_registry.get_tool_definitions().len(), 2);
 
     // 将 ToolRegistry 接入 AgentLoop
     let service = Arc::new(MockLlmService::new());
-    let agent = LlmAgentLoop::new(service, None, Arc::new(output.tools), 10);
+    let agent = LlmAgentLoop::new(service, None, Arc::new(tool_registry), 10);
 
     let request = LlmRequest {
         messages: vec![ChatMessage::user("Beijing weather and news?")],
@@ -424,7 +348,7 @@ async fn scenario_config_driven(ctx: &ExecutionContext) -> anyhow::Result<()> {
         max_tokens: None,
     };
 
-    println!("\n  Running AgentLoop with config-driven tools...");
+    println!("\n  Running AgentLoop with tools...");
     let result = agent.execute(request, ctx).await?;
     let response = result.map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("  Final: \"{}\"", response.content);
@@ -444,7 +368,7 @@ async fn main() -> anyhow::Result<()> {
     scenario_basic_chat(&ctx).await?;
     scenario_with_tools(&ctx).await?;
     scenario_agent_loop(&ctx).await?;
-    scenario_config_driven(&ctx).await?;
+    scenario_tool_agent(&ctx).await?;
 
     println!("All 4 scenarios passed.");
     Ok(())

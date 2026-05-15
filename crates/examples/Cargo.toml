@@ -12,20 +12,12 @@ name = "workflow_composite"
 path = "src/bin/workflow/composite.rs"
 
 [[bin]]
-name = "workflow_broadcast"
-path = "src/bin/workflow/broadcast.rs"
-
-[[bin]]
 name = "workflow_conditional"
 path = "src/bin/workflow/conditional.rs"
 
 [[bin]]
 name = "workflow_loop"
 path = "src/bin/workflow/loop.rs"
-
-[[bin]]
-name = "workflow_error_handler"
-path = "src/bin/workflow/error_handler.rs"
 
 [[bin]]
 name = "workflow_config_driven"
@@ -38,14 +30,6 @@ path = "src/bin/workflow/docker_python.rs"
 [[bin]]
 name = "workflow_state_node"
 path = "src/bin/workflow/state_node.rs"
-
-[[bin]]
-name = "workflow_dispatch"
-path = "src/bin/workflow/dispatch.rs"
-
-[[bin]]
-name = "workflow_reshape"
-path = "src/bin/workflow/reshape.rs"
 
 [[bin]]
 name = "workflow_http"

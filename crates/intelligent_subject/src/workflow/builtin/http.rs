@@ -1,7 +1,7 @@
 //! # HTTP Builtin Workflow
 //!
 //! HTTP 方法工作流，用于在 DAG 中调用外部 API。
-//! 输出 `Result<HttpResponse, HttpError>` — 和类型，可接入 SumMatch 节点处理成功/失败。
+//! 输出 `Result<HttpResponse, HttpError>` — 和类型，可在命名空间工作流中处理成功/失败。
 //!
 //! ## 可用 Workflow
 //!
