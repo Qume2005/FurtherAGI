@@ -87,26 +87,33 @@ impl PlanBuilder {
     ///
     /// `predicate` 是命名空间引用字符串（如 `"{a.is_positive}"`）。
     /// `children` 是子节点 ID 列表。
+    /// `then` 是可选的表达式（如 `"{inner.value}"`），当 predicate 为 true 且
+    /// 子节点执行完成后，从子命名空间解析该值并写入父命名空间的 `result_name` 下。
     pub fn add_if(
         &mut self,
         result_name: impl Into<String>,
         predicate: impl Into<String>,
         children: Vec<NodeId>,
+        then: Option<String>,
     ) -> NodeId {
         let result_name = result_name.into();
         let predicate_str = predicate.into();
         // Parse predicate as a ParamValue to extract dependency
         let pred_pv = crate::workflow::config::parse_param_value(&predicate_str);
-        let dependencies = referenced_namespace(&pred_pv)
+        let mut dependencies = referenced_namespace(&pred_pv)
             .map(|ns| vec![ns.to_string()])
             .unwrap_or_default();
+
+        // 收集子节点的传递依赖：父节点需要等待子节点依赖的上游节点完成
+        collect_child_deps(&self.nodes, &children, &mut dependencies);
+
         let id = self.alloc_id();
         self.nodes.insert(
             id,
             Node {
                 id,
                 result_name,
-                kind: NodeKind::If { predicate: predicate_str },
+                kind: NodeKind::If { predicate: predicate_str, then },
                 params: vec![("_predicate".to_string(), pred_pv)],
                 dependencies,
                 children,
@@ -137,6 +144,9 @@ impl PlanBuilder {
         if let Some(ns) = referenced_namespace(&init_pv) {
             deps.push(ns.to_string());
         }
+
+        // 收集子节点的传递依赖
+        collect_child_deps(&self.nodes, &children, &mut deps);
 
         let id = self.alloc_id();
         self.nodes.insert(
@@ -187,11 +197,15 @@ impl PlanBuilder {
     /// 构建执行计划。
     ///
     /// 执行拓扑排序（Kahn 算法）并检测循环依赖。
+    /// 同时校验嵌套作用域：If/Loop 内部节点的 `result_name` 不能被外部节点引用。
     /// 返回第一个节点作为入口。
     pub fn build(self) -> Result<ExecutionPlan, WorkflowError> {
         if self.nodes.is_empty() {
             return Err(WorkflowError::ValidationError("empty execution plan".into()));
         }
+
+        // 构建前校验作用域引用
+        self.validate_scope()?;
 
         // 构建邻接表：result_name → 依赖它的节点 ID 集合
         let name_to_id: HashMap<String, NodeId> = self.nodes.iter()
@@ -252,6 +266,52 @@ impl PlanBuilder {
             entry,
         })
     }
+
+    /// 校验跨作用域引用：If/Loop 内部节点的 `result_name` 不能被外部节点引用。
+    ///
+    /// 规则：
+    /// - 顶层节点的 `result_name` 全局可见
+    /// - If/Loop 子节点的 `result_name` 仅对同级兄弟节点和父节点可见
+    fn validate_scope(&self) -> Result<(), WorkflowError> {
+        // 1. 构建 child → parent 映射
+        let mut child_to_parent: HashMap<NodeId, NodeId> = HashMap::new();
+        for (_, node) in &self.nodes {
+            for &child_id in &node.children {
+                child_to_parent.insert(child_id, node.id);
+            }
+        }
+
+        // 2. 构建 name → node_id 映射
+        let name_to_id: HashMap<String, NodeId> = self.nodes.iter()
+            .filter(|(_, n)| !n.result_name.is_empty())
+            .map(|(_, n)| (n.result_name.clone(), n.id))
+            .collect();
+
+        // 3. 校验每个节点的依赖
+        for (_, node) in &self.nodes {
+            for dep_name in &node.dependencies {
+                if let Some(&dep_id) = name_to_id.get(dep_name) {
+                    // dep_id 是 If/Loop 的子节点
+                    if let Some(&dep_parent) = child_to_parent.get(&dep_id) {
+                        let my_parent = child_to_parent.get(&node.id);
+                        let is_sibling = my_parent == Some(&dep_parent);
+                        let is_parent = node.id == dep_parent;
+
+                        if !is_sibling && !is_parent {
+                            return Err(WorkflowError::ValidationError(
+                                format!(
+                                    "scope violation: '{}' references '{}' which is inside a nested block",
+                                    node.result_name, dep_name
+                                )
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for PlanBuilder {
@@ -268,6 +328,53 @@ fn extract_dependencies(params: &[(String, ParamValue)]) -> Vec<String> {
     deps.sort();
     deps.dedup();
     deps
+}
+
+/// 收集子节点的传递依赖，追加到 `deps` 中（去重）。
+///
+/// 递归收集子节点的依赖、孙子节点的依赖等，确保 If/Loop 节点
+/// 等待其子节点所需的所有上游节点完成。
+///
+/// 排除兄弟/后代节点的 result_name（这些依赖在子命名空间内部满足，
+/// 父节点不需要等待）。
+fn collect_child_deps(
+    nodes: &HashMap<NodeId, Node>,
+    children: &[NodeId],
+    deps: &mut Vec<String>,
+) {
+    // 收集所有后代节点的 result_name，用于排除兄弟引用
+    let descendant_names = collect_descendant_result_names(nodes, children);
+
+    for &child_id in children {
+        if let Some(child) = nodes.get(&child_id) {
+            for dep in &child.dependencies {
+                // 跳过后代节点间的引用（在子命名空间内满足）
+                if !descendant_names.contains(dep) && !deps.contains(dep) {
+                    deps.push(dep.clone());
+                }
+            }
+            // 递归收集孙子节点的依赖
+            collect_child_deps(nodes, &child.children, deps);
+        }
+    }
+}
+
+/// 递归收集所有后代节点的 result_name。
+fn collect_descendant_result_names(
+    nodes: &HashMap<NodeId, Node>,
+    children: &[NodeId],
+) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    for &child_id in children {
+        if let Some(child) = nodes.get(&child_id) {
+            if !child.result_name.is_empty() {
+                names.insert(child.result_name.clone());
+            }
+            let nested = collect_descendant_result_names(nodes, &child.children);
+            names.extend(nested);
+        }
+    }
+    names
 }
 
 #[cfg(test)]

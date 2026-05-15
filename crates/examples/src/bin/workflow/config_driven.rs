@@ -87,13 +87,14 @@ const FORMAT_XML: &str = r#"
 /// 场景 4：条件分支 (`<if>`)
 ///
 /// `is_positive(42)` -> true -> format("positive!") -> `Report: positive!`
+/// then="{inner.value}" 将子命名空间中 inner.value 传播到父命名空间的 msg
 const IF_XML: &str = r#"
 <workflow>
   <workflow result_name="check" impl="is_positive" input="42"/>
-  <if predicate="{check.value}">
-    <workflow result_name="msg" impl="format" input="positive!"/>
+  <if predicate="{check.value}" result_name="msg" then="{inner.value}">
+    <workflow result_name="inner" impl="format" input="positive!"/>
   </if>
-  <end result="{msg.value}"/>
+  <end result="{msg}"/>
 </workflow>"#;
 
 /// 场景 5：固定次数循环 (`<loop>`)

@@ -6,16 +6,23 @@
 //!
 //! 根元素为 `<workflow>`，内部包含 4 种子元素：
 //!
-//! | 元素 | 必填属性 | 说明 |
-//! |------|----------|------|
-//! | `<workflow>` | `result_name`, `impl` | 执行工作流，结果存入命名空间 |
-//! | `<if>` | `predicate` | 条件分支，内部是顺序子流程 |
-//! | `<loop>` | `result_name`, `state_init`, `next_state`, `count` | 固定次数循环 |
-//! | `<end>` | `result` | 终止工作流并返回结果 |
+//! | 元素 | 必填属性 | 可选属性 | 说明 |
+//! |------|----------|----------|------|
+//! | `<workflow>` | `result_name`, `impl` | — | 执行工作流，结果存入命名空间 |
+//! | `<if>` | `predicate` | `result_name`, `then` | 条件分支，内部是顺序子流程 |
+//! | `<loop>` | `result_name`, `state_init`, `next_state`, `count` | — | 固定次数循环 |
+//! | `<end>` | `result` | — | 终止工作流并返回结果 |
 //!
 //! 属性值支持两种形式：
 //! - **字面量**：`input="hello"` — 直接传入字符串
 //! - **引用**：`input="{a.value}"` — 从命名空间读取上游节点的输出
+//!
+//! ## 作用域规则
+//!
+//! `<if>` 和 `<loop>` 创建子命名空间。子节点在子命名空间中执行，退出后自动释放。
+//! 外部节点**不能**引用嵌套块内节点的 `result_name`（构建时报错）。
+//!
+//! `<if>` 通过可选的 `result_name` + `then` 属性将值传播到父命名空间。
 //!
 //! ## 快速开始
 //!
@@ -79,21 +86,34 @@
 //!
 //! ### 条件分支 (`<if>`)
 //!
-//! `<if>` 的 `predicate` 引用命名空间中的 `bool` 值。为 `true` 时顺序执行子节点。
+//! `<if>` 的 `predicate` 引用命名空间中的 `bool` 值。为 `true` 时在子命名空间中顺序执行子节点。
+//!
+//! 通过 `result_name` 和 `then` 属性将子命名空间中的值传播到父命名空间：
 //!
 //! ```xml
 //! <workflow>
 //!   <workflow result_name="check" impl="is_positive" input="42"/>
-//!   <if predicate="{check.value}">
-//!     <workflow result_name="msg" impl="format" input="positive!"/>
+//!   <if predicate="{check.value}" result_name="msg" then="{inner.value}">
+//!     <workflow result_name="inner" impl="format" input="positive!"/>
 //!   </if>
-//!   <end result="{msg.value}"/>
+//!   <end result="{msg}"/>
 //! </workflow>
 //! ```
 //!
-//! 执行流程：`is_positive(42)` → `true` → `<if>` 执行 `format("positive!")` → `"Report: positive!"`
+//! 执行流程：`is_positive(42)` → `true` → `<if>` 在子命名空间执行 `format("positive!")`
+//! → `then="{inner.value}"` 将 `"Report: positive!"` 传播到父命名空间 `msg` → 返回
 //!
-//! 当 predicate 为 `false` 时，子节点跳过不执行。
+//! 当 predicate 为 `false` 时，子节点跳过不执行，`then` 不传播。
+//!
+//! **作用域限制**：外部节点不能引用 `<if>` 或 `<loop>` 内部节点的 `result_name`：
+//!
+//! ```xml
+//! <!-- 无效！<end> 引用了 <if> 内部的 inner -->
+//! <if predicate="{check.value}">
+//!   <workflow result_name="inner" impl="format" input="positive!"/>
+//! </if>
+//! <end result="{inner.value}"/>  <!-- 构建时报错：scope violation -->
+//! ```
 //!
 //! ### 固定次数循环 (`<loop>`)
 //!
@@ -119,9 +139,9 @@
 //! ```xml
 //! <workflow>
 //!   <workflow result_name="init" impl="identity" input="1"/>
-//!   <if predicate="{init.value}">
-//!     <loop result_name="sum" state_init="{init.value}" next_state="{accum.value}" count="5">
-//!       <workflow result_name="accum" impl="add_one" input="{latest_state}"/>
+//!   <if predicate="{init.value}" result_name="sum" then="{accum.value}">
+//!     <loop result_name="accum" state_init="{init.value}" next_state="{step.value}" count="5">
+//!       <workflow result_name="step" impl="add_one" input="{latest_state}"/>
 //!     </loop>
 //!   </if>
 //!   <end result="{sum}"/>

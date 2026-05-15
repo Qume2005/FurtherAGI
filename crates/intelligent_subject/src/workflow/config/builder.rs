@@ -74,11 +74,19 @@ struct WorkflowElementXml {
 
 /// `<if>` 元素。
 ///
-/// 子元素（`<workflow>`、`<if>`、`<loop>`、`<end>`）在 predicate 为 true 时顺序执行。
+/// 子元素（`<workflow>`、`<if>`、`<loop>`、`<end>`）在 predicate 为 true 时
+/// 在子命名空间中顺序执行。子命名空间退出后自动释放。
+///
+/// 可选 `result_name` 和 `then` 属性：当 predicate 为 true 且子节点执行完成后，
+/// 从子命名空间解析 `then` 表达式的值，写入父命名空间的 `result_name` 下。
 #[derive(Deserialize)]
 struct IfElementXml {
     #[serde(rename = "@predicate")]
     predicate: String,
+    #[serde(rename = "@result_name", default)]
+    result_name: Option<String>,
+    #[serde(rename = "@then", default)]
+    then: Option<String>,
     #[serde(rename = "$value", default)]
     children: Vec<ElementXml>,
 }
@@ -239,14 +247,18 @@ impl ConfigBuilder {
             child_ids.push(id);
         }
 
-        // 为 if 节点生成合成 result_name。
-        let idx = IF_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let result_name = format!("__if_{idx}");
+        // result_name：用户指定或自动生成
+        let result_name = if_elem.result_name.clone()
+            .unwrap_or_else(|| {
+                let idx = IF_COUNTER.fetch_add(1, Ordering::Relaxed);
+                format!("__if_{idx}")
+            });
 
         let node_id = builder.add_if(
             &result_name,
             &if_elem.predicate,
             child_ids,
+            if_elem.then.clone(),
         );
 
         Ok(node_id)

@@ -10,6 +10,14 @@
 //! 4. 遇到 `<end>` 立即返回结果（提前终止）
 //! 5. 减少下游节点入度，重复直到所有节点完成
 //!
+//! ## 作用域执行
+//!
+//! If 和 Loop 节点创建子命名空间（[`Namespace::new_with_parent`]）：
+//! - 子节点在子命名空间中执行，写入的值仅子命名空间可见
+//! - 子命名空间通过 parent 链可读取父命名空间的值
+//! - 退出嵌套块后，子命名空间自动释放（drop）
+//! - If 的 `then` 属性可将子命名空间中的值显式传播到父命名空间
+//!
 //! ## 使用方式
 //!
 //! ```rust
@@ -221,7 +229,10 @@ impl Executor {
         }
         let kind_desc = match &node.kind {
             NodeKind::Workflow { impl_name } => format!("workflow(impl={impl_name})"),
-            NodeKind::If { predicate } => format!("if(predicate={predicate})"),
+            NodeKind::If { predicate, then } => {
+                let then_desc = then.as_deref().unwrap_or("none");
+                format!("if(predicate={predicate}, then={then_desc})")
+            }
             NodeKind::Loop { state_init, count, .. } => format!("loop(state_init={state_init}, count={count})"),
             NodeKind::End { result_ref } => format!("end(result={result_ref})"),
         };
@@ -288,11 +299,21 @@ impl Executor {
         };
 
         if pred_val {
+            // 创建子命名空间：子节点写入子命名空间，退出后自动释放
+            let child_ns = Namespace::new_with_parent(namespace);
+
             for &child_id in &node.children {
-                let outcome = Self::execute_node(plan, child_id, namespace, ctx).await?;
+                let outcome = Self::execute_node(plan, child_id, &child_ns, ctx).await?;
                 if let NodeOutcome::End(value) = outcome {
                     return Ok(NodeOutcome::End(value));
                 }
+            }
+
+            // 传播 then 值到父命名空间
+            if let NodeKind::If { then: Some(then_expr), .. } = &node.kind {
+                let pv = crate::workflow::config::parse_param_value(then_expr);
+                let value = resolve_param(&pv, &child_ns)?;
+                namespace.set_arc(&node.result_name, value);
             }
         }
 
@@ -588,5 +609,78 @@ mod tests {
         let msg = result.err().unwrap().to_string();
         assert!(msg.contains("end"), "应包含节点类型: {msg}");
         assert!(msg.contains("missing.value"), "应包含引用名: {msg}");
+    }
+
+    /// E2E: If 使用子命名空间 + then 传播值
+    #[tokio::test]
+    async fn e2e_if_then_propagates_value() {
+        let mut builder = PlanBuilder::new();
+
+        // check: 返回 true（非空字符串视为 truthy 会被 if 当作 bool 引用解析，
+        // 所以这里直接在命名空间预设 bool）
+        let branch = builder.add_workflow(
+            "inner",
+            "append_x",
+            vec![("input".to_string(), ParamValue::Literal("hello".to_string()))],
+            into_erased(AppendX),
+        );
+        builder.add_if("msg", "{check.value}", vec![branch], Some("{inner.value}".to_string()));
+        builder.add_end("{msg}");
+
+        let plan = builder.build().unwrap();
+        let ns = Namespace::new();
+        // 预设 check.value = true
+        ns.set("check.value", true);
+        let ctx = make_ctx();
+
+        let result = Executor::execute(&plan, &ns, &ctx).await.unwrap();
+        let val = result.downcast_ref::<String>().unwrap();
+        assert_eq!(*val, "helloX");
+    }
+
+    /// E2E: If predicate=false 时不执行子节点，then 不传播
+    #[tokio::test]
+    async fn e2e_if_predicate_false_no_propagation() {
+        let mut builder = PlanBuilder::new();
+
+        let branch = builder.add_workflow(
+            "inner",
+            "append_x",
+            vec![("input".to_string(), ParamValue::Literal("hello".to_string()))],
+            into_erased(AppendX),
+        );
+        builder.add_if("msg", "{check.value}", vec![branch], Some("{inner.value}".to_string()));
+        // msg 未传播，引用 check.value 作为 fallback
+        builder.add_end("{check.value}");
+
+        let plan = builder.build().unwrap();
+        let ns = Namespace::new();
+        ns.set("check.value", false);
+        let ctx = make_ctx();
+
+        let result = Executor::execute(&plan, &ns, &ctx).await.unwrap();
+        let val = result.downcast_ref::<bool>().unwrap();
+        assert_eq!(*val, false);
+    }
+
+    /// E2E: 外部节点引用嵌套块内节点 → 构建时报错
+    #[test]
+    fn e2e_scope_violation_rejected() {
+        let mut builder = PlanBuilder::new();
+
+        let branch = builder.add_workflow(
+            "inner",
+            "append_x",
+            vec![("input".to_string(), ParamValue::Literal("hi".to_string()))],
+            into_erased(AppendX),
+        );
+        builder.add_if("__if", "{check.value}", vec![branch], None);
+        // 外部节点引用嵌套块内的 inner → 构建时 scope violation
+        builder.add_end("{inner.value}");
+
+        let result = builder.build();
+        assert!(result.is_err());
+        let msg = result.err().unwrap().to_string();
+        assert!(msg.contains("scope violation"), "expected scope violation, got: {msg}");
     }
 }

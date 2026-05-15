@@ -141,3 +141,45 @@ async fn config_format_pipeline() {
     let val = result.downcast_ref::<String>().unwrap();
     assert_eq!(*val, "Report: world");
 }
+
+// ── If 作用域测试 ─────────────────────────────────────────
+
+#[tokio::test]
+async fn config_if_with_then_propagates_value() {
+    let builder = ConfigBuilder::new(make_registry());
+    let plan = builder.build_from_str(r#"
+        <workflow>
+          <workflow result_name="a" impl="append_x" input="hello"/>
+          <if predicate="{flag.value}" result_name="msg" then="{inner.value}">
+            <workflow result_name="inner" impl="append_x" input="{a.value}"/>
+          </if>
+          <end result="{msg}"/>
+        </workflow>
+    "#).unwrap();
+
+    let ns = intelligent_subject::workflow::model::Namespace::new();
+    // 预设 bool flag
+    ns.set("flag.value", true);
+    let ctx = make_ctx();
+    let result = intelligent_subject::workflow::executor::Executor::execute(&plan, &ns, &ctx).await.unwrap();
+    let val = result.downcast_ref::<String>().unwrap();
+    // a = "helloX" → if true → inner = "helloXX" → msg = "helloXX"
+    assert_eq!(val, "helloXX");
+}
+
+#[test]
+fn config_if_scope_violation_rejected() {
+    let builder = ConfigBuilder::new(make_registry());
+    let result = builder.build_from_str(r#"
+        <workflow>
+          <workflow result_name="a" impl="append_x" input="hello"/>
+          <if predicate="{a.value}">
+            <workflow result_name="inner" impl="append_x" input="world"/>
+          </if>
+          <end result="{inner.value}"/>
+        </workflow>
+    "#);
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("scope violation"), "expected scope violation, got: {msg}");
+}

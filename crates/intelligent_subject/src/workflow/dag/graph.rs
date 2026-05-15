@@ -48,10 +48,15 @@ pub enum NodeKind {
         /// 已注册的工作流工厂名。
         impl_name: String,
     },
-    /// 条件分支：引用命名空间中的 bool 值，true 时顺序执行子节点。
+    /// 条件分支：引用命名空间中的 bool 值，true 时在子命名空间中执行子节点。
     If {
         /// 谓词引用（如 `"{a.is_positive}"`）。
         predicate: String,
+        /// 可选：子节点执行后从子命名空间解析的值，写入父命名空间的 `result_name` 下。
+        ///
+        /// 例如 `then = "{inner.value}"` 将子命名空间中 `inner.value` 的值
+        /// 传播到父命名空间的 `result_name` 键下。
+        then: Option<String>,
     },
     /// 固定次数循环。
     Loop {
