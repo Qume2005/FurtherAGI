@@ -152,6 +152,69 @@
 //!
 //! - [`WorkflowFactoryRegistry`] — 映射工作流名字符串到工厂闭包。
 //!   同一个 `impl` 名可以被多个 `<workflow>` 元素引用，每次调用工厂产生独立实例。
+//!
+//! ## 更多示例
+//!
+//! ### 多参数工作流
+//!
+//! `<workflow>` 的 `result_name` 和 `impl` 之外的属性都会作为参数传入工作流。
+//! 参数值可以是字面量或引用：
+//!
+//! ```xml
+//! <workflow>
+//!   <workflow result_name="greeting" impl="greet" name="Alice" lang="en"/>
+//!   <workflow result_name="msg" impl="greet" name="Bob" lang="{greeting.value}"/>
+//!   <end result="{msg.value}"/>
+//! </workflow>
+//! ```
+//!
+//! ### 纯副作用 If（无 then）
+//!
+//! 不指定 `result_name` 和 `then` 时，`<if>` 仅执行子节点作为副作用，
+//! 不向父命名空间写入任何值：
+//!
+//! ```xml
+//! <workflow>
+//!   <workflow result_name="check" impl="is_positive" input="42"/>
+//!   <if predicate="{check.value}">
+//!     <workflow result_name="log" impl="format" input="is positive"/>
+//!   </if>
+//!   <end result="{check.value}"/>
+//! </workflow>
+//! ```
+//!
+//! ### 嵌套 If
+//!
+//! `<if>` 内可以嵌套另一个 `<if>`，内层 If 同样使用子命名空间：
+//!
+//! ```xml
+//! <workflow>
+//!   <workflow result_name="a" impl="is_positive" input="42"/>
+//!   <if predicate="{a.value}" result_name="msg" then="{inner_msg}">
+//!     <workflow result_name="b" impl="is_positive" input="-1"/>
+//!     <if predicate="{b.value}" result_name="inner_msg" then="{val.value}">
+//!       <workflow result_name="val" impl="format" input="both positive"/>
+//!     </if>
+//!   </if>
+//!   <end result="{msg}"/>
+//! </workflow>
+//! ```
+//!
+//! ### Loop 引用外部节点
+//!
+//! Loop 的 `state_init` 和子节点可以引用循环外的工作流节点：
+//!
+//! ```xml
+//! <workflow>
+//!   <workflow result_name="base" impl="identity" input="10"/>
+//!   <loop result_name="result" state_init="{base.value}" next_state="{step.value}" count="3">
+//!     <workflow result_name="step" impl="add_one" input="{latest_state}"/>
+//!   </loop>
+//!   <end result="{result}"/>
+//! </workflow>
+//! ```
+//!
+//! 执行流程：`base=10` → 迭代 1: `add_one("10")="11"` → 迭代 2: `"12"` → 迭代 3: `"13"` → 返回 `"13"`
 
 pub mod builder;
 pub mod error;
